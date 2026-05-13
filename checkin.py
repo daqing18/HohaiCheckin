@@ -41,13 +41,23 @@ def send_telegram_notification(payload: dict):
     if not TG_BOT_TOKEN or not TG_CHAT_ID:
         return
 
+    status_map = {
+        "already_signed": "今日已签到",
+        "checked_in_now": "本次签到成功",
+        "checkin_uncertain": "签到结果不确定",
+        "sign_button_not_found": "未找到签到入口",
+        "failed": "执行失败",
+    }
+    signed_text = "是" if payload.get("signed_today") else "否"
+    status_text = status_map.get(payload.get("status"), payload.get("status"))
+
     text = (
-        "🦐 Hohai 自动签到结果\n"
-        f"status: {payload.get('status')}\n"
-        f"signed_today: {payload.get('signed_today')}\n"
-        f"balance: {payload.get('balance')}\n"
-        f"note: {payload.get('note') or '-'}\n"
-        f"time: {payload.get('time')}"
+        "✅ Hohai 自动签到通知\n"
+        f"📌 状态：{status_text}\n"
+        f"🗓️ 今日是否已签到：{signed_text}\n"
+        f"💰 账户余额：{payload.get('balance') or '未识别'}\n"
+        f"📝 备注：{payload.get('note') or '无'}\n"
+        f"⏰ 时间：{payload.get('time')}"
     )
 
     data = {
