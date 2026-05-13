@@ -3,7 +3,7 @@ import os
 import re
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -25,10 +25,12 @@ if not USERNAME or not PASSWORD:
 
 artifacts = Path("artifacts")
 artifacts.mkdir(parents=True, exist_ok=True)
-ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+CN_TZ = timezone(timedelta(hours=8))
+now_cn = datetime.now(CN_TZ)
+ts = now_cn.strftime("%Y%m%dT%H%M%S%z")
 
 result = {
-    "time": datetime.utcnow().isoformat() + "Z",
+    "time": now_cn.isoformat(),
     "url": URL,
     "status": "unknown",
     "signed_today": False,
