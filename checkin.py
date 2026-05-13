@@ -12,7 +12,9 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 load_dotenv()
 
-URL = os.getenv("HOHAI_URL", "https://tv.hohai.eu.org/dashboard")
+BASE_URL = os.getenv("HOHAI_BASE_URL", "https://tv.hohai.eu.org")
+LOGIN_URL = os.getenv("HOHAI_LOGIN_URL", f"{BASE_URL}/login")
+DASHBOARD_URL = os.getenv("HOHAI_DASHBOARD_URL", f"{BASE_URL}/dashboard")
 USERNAME = os.getenv("HOHAI_USERNAME")
 PASSWORD = os.getenv("HOHAI_PASSWORD")
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
@@ -31,11 +33,12 @@ ts = now_cn.strftime("%Y%m%dT%H%M%S%z")
 
 result = {
     "time": now_cn.isoformat(),
-    "url": URL,
+    "url": DASHBOARD_URL,
     "status": "unknown",
     "signed_today": False,
     "balance": None,
     "note": "",
+    "debug_hints": [],
 }
 
 
@@ -107,9 +110,10 @@ with sync_playwright() as p:
     page = context.new_page()
 
     try:
-        page.goto(URL, wait_until="domcontentloaded", timeout=60_000)
+        # 1) go login page first
+        page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
 
-        # login if form exists
+        # 2) login
         user_input = page.locator('input[name="email"], input[name="username"], input[type="text"]').first
         pass_input = page.locator('input[type="password"]').first
         if user_input.count() > 0 and pass_input.count() > 0:
@@ -118,22 +122,46 @@ with sync_playwright() as p:
             submit = page.locator('button:has-text("登录"), button:has-text("Sign in"), button:has-text("Login"), button[type="submit"]').first
             submit.click()
             page.wait_for_load_state("networkidle")
+        else:
+            result["debug_hints"].append("登录页未识别到用户名/密码输入框")
+
+        # 3) go dashboard after login
+        page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60_000)
+        page.wait_for_load_state("networkidle")
 
         signed_text_a = page.get_by_text("今日已签到")
         signed_text_b = page.get_by_text("签到完成")
-        sign_btn = page.locator('button:has-text("签到")').first
-        sign_text = page.get_by_text("签到").first
+
+        def find_sign_target():
+            candidates = [
+                page.locator('button:has-text("签到")').first,
+                page.locator('[role="button"]:has-text("签到")').first,
+                page.locator('div:has-text("签到")').first,
+                page.locator('span:has-text("签到")').first,
+                page.get_by_text("签到").first,
+            ]
+            for loc in candidates:
+                if loc.count() > 0:
+                    return loc
+            return None
+
+        sign_target = None
+        for _ in range(8):
+            already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
+            if already_signed_now:
+                break
+            sign_target = find_sign_target()
+            if sign_target is not None:
+                break
+            page.wait_for_timeout(2500)
 
         already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
 
         if already_signed_now:
             result["status"] = "already_signed"
             result["signed_today"] = True
-        elif sign_btn.count() > 0 or sign_text.count() > 0:
-            if sign_btn.count() > 0:
-                sign_btn.click()
-            else:
-                sign_text.click()
+        elif sign_target is not None:
+            sign_target.click()
             page.wait_for_timeout(1500)
 
             # Best-effort Cloudflare turnstile click.
@@ -164,6 +192,10 @@ with sync_playwright() as p:
         else:
             result["status"] = "sign_button_not_found"
             result["note"] = "Sign button/card not found. UI may have changed."
+            if page.locator('input[type="password"]').count() > 0:
+                result["debug_hints"].append("当前页面疑似仍在登录页")
+            if any(re.search(r"cloudflare|turnstile", f.url, re.IGNORECASE) for f in page.frames):
+                result["debug_hints"].append("检测到 Cloudflare/Turnstile frame")
 
         page_text = page.locator("body").inner_text()
         result["balance"] = detect_balance(page_text)

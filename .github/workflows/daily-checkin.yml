@@ -28,7 +28,9 @@ jobs:
 
       - name: Run check-in
         env:
-          HOHAI_URL: ${{ secrets.HOHAI_URL }}
+          HOHAI_BASE_URL: ${{ secrets.HOHAI_BASE_URL }}
+          HOHAI_LOGIN_URL: ${{ secrets.HOHAI_LOGIN_URL }}
+          HOHAI_DASHBOARD_URL: ${{ secrets.HOHAI_DASHBOARD_URL }}
           HOHAI_USERNAME: ${{ secrets.HOHAI_USERNAME }}
           HOHAI_PASSWORD: ${{ secrets.HOHAI_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

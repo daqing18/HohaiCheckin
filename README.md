@@ -20,7 +20,9 @@ python checkin.py
 
 ## GitHub Actions 配置
 在仓库里设置以下 Secrets：
-- `HOHAI_URL`（可设为 `https://tv.hohai.eu.org/dashboard`）
+- `HOHAI_BASE_URL`（建议 `https://tv.hohai.eu.org`）
+- `HOHAI_LOGIN_URL`（`https://tv.hohai.eu.org/login`）
+- `HOHAI_DASHBOARD_URL`（`https://tv.hohai.eu.org/dashboard`）
 - `HOHAI_USERNAME`
 - `HOHAI_PASSWORD`
 
