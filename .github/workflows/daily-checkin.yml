@@ -31,13 +31,16 @@ jobs:
           HOHAI_URL: ${{ secrets.HOHAI_URL }}
           HOHAI_USERNAME: ${{ secrets.HOHAI_USERNAME }}
           HOHAI_PASSWORD: ${{ secrets.HOHAI_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
           HEADLESS: 'true'
         run: python checkin.py
 
-      - name: Upload artifacts
+      - name: Upload JSON artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hohai-checkin-artifacts
-          path: artifacts/
+          name: hohai-checkin-json
+          path: artifacts/*.json
           if-no-files-found: ignore

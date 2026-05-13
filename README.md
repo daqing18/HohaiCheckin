@@ -32,10 +32,19 @@ python checkin.py
 
 ## 结果产物
 每次执行会输出到 `artifacts/`：
-- 截图（成功或失败）
 - `result-*.json`（状态、余额解析、备注）
 
-并通过 `upload-artifact` 上传到本次 Actions 运行中。
+并通过 `upload-artifact` 上传到本次 Actions 运行中（仅 JSON）。
+
+## Telegram 通知
+脚本支持执行后自动发 Telegram 消息。
+
+新增 Secrets：
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_THREAD_ID`（可选，群组 topic）
+
+若不配置 Telegram secrets，脚本会跳过通知，不影响签到流程。
 
 ## 状态说明
 - `already_signed`：当天已签到

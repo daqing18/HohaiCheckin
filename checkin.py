@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +16,9 @@ URL = os.getenv("HOHAI_URL", "https://tv.hohai.eu.org/dashboard")
 USERNAME = os.getenv("HOHAI_USERNAME")
 PASSWORD = os.getenv("HOHAI_PASSWORD")
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
+TG_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TG_THREAD_ID = os.getenv("TELEGRAM_THREAD_ID")
 
 if not USERNAME or not PASSWORD:
     raise SystemExit("Missing HOHAI_USERNAME or HOHAI_PASSWORD")
@@ -29,14 +34,49 @@ result = {
     "signed_today": False,
     "balance": None,
     "note": "",
-    "screenshot": None,
 }
+
+
+def send_telegram_notification(payload: dict):
+    if not TG_BOT_TOKEN or not TG_CHAT_ID:
+        return
+
+    text = (
+        "🦐 Hohai 自动签到结果\n"
+        f"status: {payload.get('status')}\n"
+        f"signed_today: {payload.get('signed_today')}\n"
+        f"balance: {payload.get('balance')}\n"
+        f"note: {payload.get('note') or '-'}\n"
+        f"time: {payload.get('time')}"
+    )
+
+    data = {
+        "chat_id": TG_CHAT_ID,
+        "text": text,
+        "disable_web_page_preview": "true",
+    }
+    if TG_THREAD_ID:
+        data["message_thread_id"] = TG_THREAD_ID
+
+    body = urllib.parse.urlencode(data).encode("utf-8")
+    req = urllib.request.Request(
+        url=f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+        data=body,
+        method="POST",
+    )
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            pass
+    except Exception as e:
+        print(f"[warn] telegram notify failed: {e}")
 
 
 def save_result_and_exit(code: int = 0):
     result_path = artifacts / f"result-{ts}.json"
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    send_telegram_notification(result)
     raise SystemExit(code)
 
 
@@ -115,10 +155,6 @@ with sync_playwright() as p:
         page_text = page.locator("body").inner_text()
         result["balance"] = detect_balance(page_text)
 
-        shot = artifacts / f"checkin-{ts}.png"
-        page.screenshot(path=str(shot), full_page=True)
-        result["screenshot"] = str(shot)
-
         if result["signed_today"]:
             save_result_and_exit(0)
         else:
@@ -127,12 +163,6 @@ with sync_playwright() as p:
     except Exception as e:
         result["status"] = "failed"
         result["note"] = str(e)
-        try:
-            shot = artifacts / f"error-{ts}.png"
-            page.screenshot(path=str(shot), full_page=True)
-            result["screenshot"] = str(shot)
-        except Exception:
-            pass
         save_result_and_exit(1)
     finally:
         context.close()
