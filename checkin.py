@@ -42,14 +42,15 @@ def send_telegram_notification(payload: dict):
         return
 
     status_map = {
-        "already_signed": ("🟢", "今日已签到"),
-        "checked_in_now": ("🟢", "本次签到成功"),
-        "checkin_uncertain": ("🟡", "签到结果不确定"),
-        "sign_button_not_found": ("🟠", "未找到签到入口"),
-        "failed": ("🔴", "执行失败"),
+        "already_signed": "今日已签到",
+        "checked_in_now": "本次签到成功",
+        "checkin_uncertain": "签到结果不确定",
+        "sign_button_not_found": "未找到签到入口",
+        "failed": "执行失败",
     }
     signed_text = "是" if payload.get("signed_today") else "否"
-    icon, status_text = status_map.get(payload.get("status"), ("⚪", str(payload.get("status"))))
+    status_text = status_map.get(payload.get("status"), str(payload.get("status")))
+    icon = "🟢" if payload.get("signed_today") else "🔴"
 
     text = (
         f"{icon} Hohai 自动签到通知\n"
