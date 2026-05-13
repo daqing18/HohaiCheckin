@@ -66,14 +66,21 @@ with sync_playwright() as p:
             submit.click()
             page.wait_for_load_state("networkidle")
 
-        already_signed = page.locator("text=今日已签到, text=签到完成")
-        sign_btn = page.locator('button:has-text("签到"), text=签到').first
+        signed_text_a = page.get_by_text("今日已签到")
+        signed_text_b = page.get_by_text("签到完成")
+        sign_btn = page.locator('button:has-text("签到")').first
+        sign_text = page.get_by_text("签到").first
 
-        if already_signed.count() > 0:
+        already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
+
+        if already_signed_now:
             result["status"] = "already_signed"
             result["signed_today"] = True
-        elif sign_btn.count() > 0:
-            sign_btn.click()
+        elif sign_btn.count() > 0 or sign_text.count() > 0:
+            if sign_btn.count() > 0:
+                sign_btn.click()
+            else:
+                sign_text.click()
             page.wait_for_timeout(1500)
 
             # Best-effort Cloudflare turnstile click.
@@ -92,7 +99,8 @@ with sync_playwright() as p:
 
             page.wait_for_timeout(3000)
 
-            if already_signed.count() > 0:
+            already_signed_after = signed_text_a.count() > 0 or signed_text_b.count() > 0
+            if already_signed_after:
                 result["status"] = "checked_in_now"
                 result["signed_today"] = True
                 if cf_clicked:
