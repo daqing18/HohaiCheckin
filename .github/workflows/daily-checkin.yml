@@ -1,0 +1,43 @@
+name: Hohai Daily Check-in
+
+on:
+  schedule:
+    # UTC time; 00:08 UTC = 08:08 Asia/Shanghai
+    - cron: '8 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run check-in
+        env:
+          HOHAI_URL: ${{ secrets.HOHAI_URL }}
+          HOHAI_USERNAME: ${{ secrets.HOHAI_USERNAME }}
+          HOHAI_PASSWORD: ${{ secrets.HOHAI_PASSWORD }}
+          HEADLESS: 'true'
+        run: python checkin.py
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hohai-checkin-artifacts
+          path: artifacts/
+          if-no-files-found: ignore
