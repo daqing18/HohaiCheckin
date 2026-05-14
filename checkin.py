@@ -21,19 +21,13 @@ HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 TG_BOT_TOKEN = os.getenv("HOHAI_TGTK")
 TG_CHAT_ID = os.getenv("HOHAI_TGID")
 STRICT_PROXY = os.getenv("STRICT_PROXY", "true").lower() == "true"
-
-# Top-3 selected from connectivity benchmark (this environment):
-# 1) 47.83.168.191:4000  (3/3 success, fastest)
-# 2) 45.146.243.133:1080 (3/3 success, slower)
-# 3) 47.238.203.170:50000 (2/3 success, very slow, as fallback)
-DEFAULT_PROXY_POOL = [
-    "http://45.146.243.133:1080",
-    "http://47.83.168.191:4000",
-    "http://47.238.203.170:50000",
-]
+# Single upstream — sing-box (or any local proxy chain) handles failover/auth/urltest.
+HTTP_PROXY_URL = os.getenv("HTTP_PROXY_URL", "").strip() or None
 
 if not USERNAME or not PASSWORD:
     raise SystemExit("Missing HOHAI_UN or HOHAI_PW")
+if STRICT_PROXY and not HTTP_PROXY_URL:
+    raise SystemExit("STRICT_PROXY=true but HTTP_PROXY_URL is empty")
 
 CN_TZ = timezone(timedelta(hours=8))
 NOW = datetime.now(CN_TZ)
@@ -56,19 +50,6 @@ result = {
 def log(msg: str):
     t = datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M:%S%z")
     print(f"[{t}] {msg}")
-
-
-def parse_proxy_pool():
-    raw = os.getenv("HTTP_PROXY_POOL", "").strip()
-    if not raw:
-        return DEFAULT_PROXY_POOL
-    try:
-        arr = json.loads(raw)
-        if isinstance(arr, list):
-            return [str(x).strip() for x in arr if str(x).strip()]
-    except Exception:
-        pass
-    return DEFAULT_PROXY_POOL
 
 
 def save_and_exit(code: int):
@@ -315,31 +296,15 @@ def run_once(proxy: str | None):
             browser.close()
 
 
-pool = parse_proxy_pool()
-last_error = None
-for i, proxy in enumerate(pool, start=1):
-    try:
-        log(f"尝试代理 {i}/{len(pool)}")
-        code = run_once(proxy)
-        save_and_exit(code)
-    except Exception as e:
-        last_error = e
-        result["debug_hints"].append(f"代理失败: {proxy}")
-        log(f"代理失败: {proxy} -> {e}")
-
-if STRICT_PROXY:
-    result["status"] = "执行失败"
-    result["note"] = "All proxies failed in STRICT_PROXY mode"
-    result["debug_hints"].append("严格代理模式已启用：禁止直连回退")
-    save_and_exit(1)
-
-# non-strict fallback: direct connection
 try:
-    log("所有代理失败，回退直连")
-    result["debug_hints"].append("所有代理失败，已回退直连")
-    code = run_once(None)
+    if HTTP_PROXY_URL:
+        log(f"使用本地代理入口: {HTTP_PROXY_URL}")
+    else:
+        log("未配置 HTTP_PROXY_URL，直连运行")
+    code = run_once(HTTP_PROXY_URL)
     save_and_exit(code)
 except Exception as e:
     result["status"] = "执行失败"
-    result["note"] = str(e if e else last_error)
+    result["note"] = str(e) or "unknown error"
+    result["debug_hints"].append(f"运行异常: {e}")
     save_and_exit(1)

@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# Env
+.env
+.env.local
+
+# Generated artifacts
+artifacts/
+singbox/config.json
+singbox/singbox.log
+
+# Local tooling
+.venv/

@@ -2,6 +2,8 @@ name: Hohai Daily Check-in
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  SINGBOX_VERSION: "1.10.7"
+  PROXY_ENDPOINT: "http://127.0.0.1:7890"
 
 on:
   schedule:
@@ -23,11 +25,66 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
+
+      - name: Install sing-box
+        run: |
+          set -euo pipefail
+          ver="${SINGBOX_VERSION}"
+          arch="linux-amd64"
+          url="https://github.com/SagerNet/sing-box/releases/download/v${ver}/sing-box-${ver}-${arch}.tar.gz"
+          curl -fsSL "$url" -o /tmp/sing-box.tar.gz
+          tar -xzf /tmp/sing-box.tar.gz -C /tmp
+          sudo install -m 0755 "/tmp/sing-box-${ver}-${arch}/sing-box" /usr/local/bin/sing-box
+          sing-box version
+
+      - name: Render sing-box config
+        env:
+          PROXY_NODES_JSON: ${{ secrets.PROXY_NODES_JSON }}
+        run: |
+          set -euo pipefail
+          python tools/render_singbox.py
+          sing-box check -c singbox/config.json
+
+      - name: Start sing-box
+        run: |
+          set -euo pipefail
+          mkdir -p singbox
+          nohup sing-box run -c singbox/config.json > singbox/singbox.log 2>&1 &
+          echo $! > singbox/sing-box.pid
+          disown || true
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/7890) >/dev/null 2>&1; then
+              echo "sing-box mixed inbound ready on 127.0.0.1:7890 (after ${i}s)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::sing-box did not become ready in 30s"
+          tail -n 200 singbox/singbox.log || true
+          exit 1
+
+      - name: Health check via proxy
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            --max-time 25 -x "${PROXY_ENDPOINT}" \
+            "https://tv.hohai.eu.org/login" || echo "000")
+          echo "Target login page HTTP status via proxy: $code"
+          case "$code" in
+            2*|3*)
+              echo "proxy health check ok"
+              ;;
+            *)
+              echo "::error::proxy health check failed (status=$code)"
+              tail -n 200 singbox/singbox.log || true
+              exit 1
+              ;;
+          esac
 
       - name: Run check-in
         env:
@@ -37,14 +94,30 @@ jobs:
           HOHAI_TGID: ${{ secrets.HOHAI_TGID }}
           HEADLESS: 'true'
           STRICT_PROXY: 'true'
-          # Optional override. Keep JSON array string.
-          HTTP_PROXY_POOL: ${{ secrets.HTTP_PROXY_POOL }}
+          HTTP_PROXY_URL: ${{ env.PROXY_ENDPOINT }}
         run: python checkin.py
 
-      - name: Upload JSON artifacts
+      - name: Stop sing-box
+        if: always()
+        run: |
+          if [ -f singbox/sing-box.pid ]; then
+            pid="$(cat singbox/sing-box.pid)"
+            if kill -0 "$pid" 2>/dev/null; then
+              kill "$pid" 2>/dev/null || true
+              for i in 1 2 3 4 5; do
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 1
+              done
+              kill -9 "$pid" 2>/dev/null || true
+            fi
+          fi
+
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: hohai-checkin-json
-          path: artifacts/*.json
+          name: hohai-checkin
+          path: |
+            artifacts/*.json
+            singbox/singbox.log
           if-no-files-found: ignore
