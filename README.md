@@ -1,6 +1,8 @@
 # HohaiCheckin
 
-已切换为 **VPS 本地运行（.sh + systemd）**，不再依赖 GitHub Actions / venv。
+当前支持两种本地运行：
+- Linux: `.sh + systemd`
+- Windows: `.bat + 任务计划程序`
 
 ## 目录说明
 - `checkin.py`：签到主逻辑（Playwright）
@@ -57,6 +59,31 @@ sudo systemctl status hohai-checkin.service
 sudo journalctl -u hohai-checkin.service -n 200 --no-pager
 # 或查看文件日志
 sudo tail -n 200 /var/log/hohai-checkin.log
+```
+
+## Windows 运行方式（新增）
+1) 安装 Python 3（勾选 Add Python to PATH）
+2) 在项目目录创建 `.env`（从 `.env.example` 复制并填写）
+3) 手动执行：
+```bat
+checkin_windows.bat
+```
+
+### Windows 定时任务（每天执行）
+以管理员 PowerShell 执行：
+```powershell
+cd <你的项目目录>
+.\setup_windows_task.ps1 -TaskName "HohaiDailyCheckin" -RunTime "08:08"
+```
+
+手动触发测试：
+```powershell
+Start-ScheduledTask -TaskName HohaiDailyCheckin
+```
+
+查看任务：
+```powershell
+Get-ScheduledTask -TaskName HohaiDailyCheckin
 ```
 
 ## 说明
