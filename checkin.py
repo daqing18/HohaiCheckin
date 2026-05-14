@@ -327,7 +327,7 @@ def run_once(proxy: str | None):
                     page.wait_for_timeout(1000)
 
                 if widget_box and widget_box.get("w", 0) > 50:
-                    x = widget_box["x"] + 22
+                    x = widget_box["x"] + 18
                     y = widget_box["y"] + widget_box["h"] / 2
                     page.mouse.move(x, y)
                     page.wait_for_timeout(200)
