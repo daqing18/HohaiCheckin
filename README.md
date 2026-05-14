@@ -23,8 +23,15 @@ python checkin.py
 在仓库里设置以下 Secrets：
 - `HOHAI_UN`
 - `HOHAI_PW`
-- `SOCKS5_PROXY`（可选，例如 `socks5://username:password@x.x.x.x:port`）
+- `SOCKS5_PROXY`（可选）
+  - 支持单个代理：`socks5://username:password@x.x.x.x:port`
+  - 支持 JSON 数组（同一个变量中多个代理）：
+    - `[
+      "socks5://user1:pass1@1.1.1.1:1080",
+      "socks5://user2:pass2@2.2.2.2:1080"
+      ]`
   - 支持用户名/密码包含 `@ : /`，脚本会自动做 URL 编码转换
+  - 运行时会按顺序尝试代理，失败自动切换下一个，全部失败后回退直连
 
 路径：`Settings -> Secrets and variables -> Actions -> New repository secret`
 

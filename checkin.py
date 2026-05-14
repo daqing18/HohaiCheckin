@@ -45,6 +45,27 @@ def log_step(message: str):
     print(f"[{now}] {message}")
 
 
+def parse_proxy_candidates(raw: str):
+    """
+    SOCKS5_PROXY supports:
+    1) single string: socks5://user:pass@ip:port
+    2) JSON array string: ["socks5://...", "socks5://..."]
+    """
+    if not raw:
+        return []
+    v = raw.strip()
+    if not v:
+        return []
+    if v.startswith("["):
+        try:
+            arr = json.loads(v)
+            if isinstance(arr, list):
+                return [str(x).strip() for x in arr if str(x).strip()]
+        except Exception:
+            pass
+    return [v]
+
+
 def normalize_socks5_proxy(proxy: str) -> str:
     """
     Allow raw credentials containing @ : / and normalize to a valid proxy URL.
@@ -134,17 +155,17 @@ def detect_balance(text: str):
     return None
 
 
-def run_once(use_proxy: bool):
+def run_once(use_proxy: bool, proxy_server: str | None = None):
     with sync_playwright() as p:
         launch_kwargs = {
             "headless": HEADLESS,
             "args": ["--disable-blink-features=AutomationControlled"],
         }
         log_step("启动浏览器")
-        if use_proxy and SOCKS5_PROXY:
-            normalized_proxy = normalize_socks5_proxy(SOCKS5_PROXY)
+        if use_proxy and proxy_server:
+            normalized_proxy = normalize_socks5_proxy(proxy_server)
             launch_kwargs["proxy"] = {"server": normalized_proxy}
-            log_step("已启用 SOCKS5 代理")
+            log_step(f"已启用 SOCKS5 代理: {normalized_proxy}")
         elif SOCKS5_PROXY:
             log_step("使用直连模式（已跳过 SOCKS5 代理）")
 
@@ -266,24 +287,41 @@ def run_once(use_proxy: bool):
             browser.close()
 
 
-try:
-    exit_code = run_once(use_proxy=True)
-    save_result_and_exit(exit_code)
-except Exception as e:
-    msg = str(e)
-    if "ERR_SOCKS_CONNECTION_FAILED" in msg and SOCKS5_PROXY:
-        log_step("代理连接失败，自动回退到直连重试")
-        result["debug_hints"].append("SOCKS5 连接失败，已回退直连")
+proxy_candidates = parse_proxy_candidates(SOCKS5_PROXY)
+
+if proxy_candidates:
+    for i, proxy in enumerate(proxy_candidates, start=1):
         try:
-            exit_code = run_once(use_proxy=False)
+            log_step(f"尝试代理 {i}/{len(proxy_candidates)}")
+            exit_code = run_once(use_proxy=True, proxy_server=proxy)
             save_result_and_exit(exit_code)
-        except Exception as e2:
+        except Exception as e:
+            msg = str(e)
+            if "ERR_SOCKS_CONNECTION_FAILED" in msg:
+                result["debug_hints"].append(f"代理 {i} 连接失败")
+                log_step(f"代理 {i} 连接失败，尝试下一个")
+                continue
             result["status"] = "failed"
-            result["note"] = str(e2)
-            log_step(f"直连重试仍失败：{e2}")
+            result["note"] = msg
+            log_step(f"任务异常：{e}")
             save_result_and_exit(1)
-    else:
+
+    log_step("所有代理均失败，自动回退到直连重试")
+    result["debug_hints"].append("所有 SOCKS5 代理连接失败，已回退直连")
+    try:
+        exit_code = run_once(use_proxy=False)
+        save_result_and_exit(exit_code)
+    except Exception as e2:
         result["status"] = "failed"
-        result["note"] = msg
+        result["note"] = str(e2)
+        log_step(f"直连重试仍失败：{e2}")
+        save_result_and_exit(1)
+else:
+    try:
+        exit_code = run_once(use_proxy=False)
+        save_result_and_exit(exit_code)
+    except Exception as e:
+        result["status"] = "failed"
+        result["note"] = str(e)
         log_step(f"任务异常：{e}")
         save_result_and_exit(1)
