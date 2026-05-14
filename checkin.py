@@ -8,6 +8,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright_stealth import stealth_sync
 
 load_dotenv()
 
@@ -223,6 +224,10 @@ def run_once(proxy: str | None):
         browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={"width": 1366, "height": 900})
         page = context.new_page()
+        try:
+            stealth_sync(page)
+        except Exception as e:
+            result["debug_hints"].append(f"stealth 注入失败: {e}")
 
         network_log: list[dict] = []
         static_re = re.compile(r"\.(?:js|css|woff2?|ttf|png|jpe?g|gif|svg|ico|map)(?:\?|$)", re.IGNORECASE)
@@ -307,19 +312,26 @@ def run_once(proxy: str | None):
                 click_at = datetime.now(CN_TZ).isoformat()
 
                 sign_target.click()
-                page.wait_for_timeout(2500)
+
+                try:
+                    page.wait_for_selector('iframe[src*="challenges.cloudflare.com"]', timeout=15000)
+                except PlaywrightTimeoutError:
+                    result["debug_hints"].append("未检测到 Turnstile iframe")
 
                 for f in page.frames:
-                    if re.search(r"cloudflare|turnstile", f.url, re.IGNORECASE):
-                        cb = f.locator('input[type="checkbox"], div[role="checkbox"], label').first
-                        if cb.count() > 0:
-                            try:
-                                cb.click(timeout=5000)
-                            except PlaywrightTimeoutError:
-                                pass
+                    if "challenges.cloudflare.com" in (f.url or ""):
+                        try:
+                            cb = f.locator('input[type="checkbox"]').first
+                            cb.wait_for(state="visible", timeout=10000)
+                            cb.click(timeout=8000)
+                            result["debug_hints"].append("已点击 Turnstile checkbox")
+                        except Exception as e:
+                            result["debug_hints"].append(f"Turnstile checkbox 点击失败: {e}")
                         break
 
-                page.wait_for_timeout(3000)
+                # Allow Cloudflare to run its silent challenge and let the frontend
+                # POST the checkin API afterwards.
+                page.wait_for_timeout(20000)
 
                 try:
                     page.screenshot(path=str(ARTIFACTS / f"after-click-{TS}.png"), full_page=True)
@@ -335,13 +347,24 @@ def run_once(proxy: str | None):
                 except Exception as e:
                     result["debug_hints"].append(f"network log write failed: {e}")
 
-                if is_signed_card(page):
+                checkin_api_ok = any(
+                    re.search(r"/api/.*(check[-_]?in|sign|task)", ev.get("url", ""), re.IGNORECASE)
+                    and 200 <= int(ev.get("status", 0)) < 300
+                    for ev in network_log
+                )
+
+                if checkin_api_ok:
                     result["status"] = "本次签到成功"
                     result["signed_today"] = True
-                    log("签到成功")
+                    result["debug_hints"].append("检测到签到 API 2xx 响应")
+                    log("签到成功 (via API)")
+                elif is_signed_card(page):
+                    result["status"] = "本次签到成功"
+                    result["signed_today"] = True
+                    log("签到成功 (via DOM)")
                 else:
                     result["status"] = "签到结果不确定"
-                    result["note"] = "Clicked sign-in but card state did not change"
+                    result["note"] = "Clicked sign-in but no checkin API hit nor card state change"
             else:
                 result["status"] = "未找到签到入口"
                 result["note"] = "No sign-in control found"
