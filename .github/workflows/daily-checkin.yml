@@ -5,8 +5,8 @@ env:
 
 on:
   schedule:
-    # 08:08 Asia/Shanghai
-    - cron: '8 0 * * *'
+    # 00:05 Asia/Shanghai
+    - cron: '5 16 * * *'
   workflow_dispatch:
 
 jobs:
