@@ -33,7 +33,6 @@ jobs:
           SOCKS5_PROXY: ${{ secrets.SOCKS5_PROXY }}
           HOHAI_TGTK: ${{ secrets.HOHAI_TGTK }}
           HOHAI_TGID: ${{ secrets.HOHAI_TGID }}
-          TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
           HEADLESS: 'true'
         run: python checkin.py
 

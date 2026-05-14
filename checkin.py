@@ -19,7 +19,6 @@ PASSWORD = os.getenv("HOHAI_PW")
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 TG_BOT_TOKEN = os.getenv("HOHAI_TGTK")
 TG_CHAT_ID = os.getenv("HOHAI_TGID")
-TG_THREAD_ID = os.getenv("TELEGRAM_THREAD_ID")
 SOCKS5_PROXY = os.getenv("SOCKS5_PROXY")
 
 if not USERNAME or not PASSWORD:
@@ -71,9 +70,6 @@ def send_telegram_notification(payload: dict):
         "text": text,
         "disable_web_page_preview": "true",
     }
-    if TG_THREAD_ID:
-        data["message_thread_id"] = TG_THREAD_ID
-
     body = urllib.parse.urlencode(data).encode("utf-8")
     req = urllib.request.Request(
         url=f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",

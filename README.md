@@ -42,7 +42,6 @@ python checkin.py
 新增 Secrets：
 - `HOHAI_TGTK`
 - `HOHAI_TGID`
-- `TELEGRAM_THREAD_ID`（可选，群组 topic）
 
 若不配置 Telegram secrets，脚本会跳过通知，不影响签到流程。
 
