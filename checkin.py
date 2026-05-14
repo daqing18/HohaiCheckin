@@ -134,140 +134,156 @@ def detect_balance(text: str):
     return None
 
 
-with sync_playwright() as p:
-    launch_kwargs = {
-        "headless": HEADLESS,
-        "args": ["--disable-blink-features=AutomationControlled"],
-    }
-    log_step("启动浏览器")
-    if SOCKS5_PROXY:
-        normalized_proxy = normalize_socks5_proxy(SOCKS5_PROXY)
-        launch_kwargs["proxy"] = {"server": normalized_proxy}
-        log_step("已启用 SOCKS5 代理")
+def run_once(use_proxy: bool):
+    with sync_playwright() as p:
+        launch_kwargs = {
+            "headless": HEADLESS,
+            "args": ["--disable-blink-features=AutomationControlled"],
+        }
+        log_step("启动浏览器")
+        if use_proxy and SOCKS5_PROXY:
+            normalized_proxy = normalize_socks5_proxy(SOCKS5_PROXY)
+            launch_kwargs["proxy"] = {"server": normalized_proxy}
+            log_step("已启用 SOCKS5 代理")
+        elif SOCKS5_PROXY:
+            log_step("使用直连模式（已跳过 SOCKS5 代理）")
 
-    browser = p.chromium.launch(**launch_kwargs)
-    context = browser.new_context(viewport={"width": 1366, "height": 900})
-    page = context.new_page()
+        browser = p.chromium.launch(**launch_kwargs)
+        context = browser.new_context(viewport={"width": 1366, "height": 900})
+        page = context.new_page()
 
-    try:
-        # 1) go login page first
-        log_step(f"正在访问 {LOGIN_URL}…")
-        page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
+        try:
+            log_step(f"正在访问 {LOGIN_URL}…")
+            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
 
-        # 2) login
-        log_step("正在执行登录")
-        user_inputs = page.locator('input[name="email"], input[name="username"], input[type="text"], input[placeholder*="用户"], input[placeholder*="账号"], input[placeholder*="邮箱"], input[id*="user" i], input[id*="email" i]')
-        pass_inputs = page.locator('input[type="password"], input[placeholder*="密码"], input[id*="pass" i]')
+            log_step("正在执行登录")
+            user_inputs = page.locator('input[name="email"], input[name="username"], input[type="text"], input[placeholder*="用户"], input[placeholder*="账号"], input[placeholder*="邮箱"], input[id*="user" i], input[id*="email" i]')
+            pass_inputs = page.locator('input[type="password"], input[placeholder*="密码"], input[id*="pass" i]')
 
-        if user_inputs.count() > 0 and pass_inputs.count() > 0:
-            user_input = user_inputs.first
-            pass_input = pass_inputs.first
-            user_input.fill(USERNAME)
-            pass_input.fill(PASSWORD)
-            submit = page.locator('button:has-text("登录"), button:has-text("Sign in"), button:has-text("Login"), button[type="submit"], [role="button"]:has-text("登录")').first
-            submit.click()
-            page.wait_for_timeout(2000)
-            page.wait_for_load_state("networkidle")
-            log_step("登录流程已提交，等待页面跳转")
-        else:
-            result["debug_hints"].append("登录页未识别到用户名/密码输入框，可能已处于登录态")
-            log_step("未识别到登录输入框，按已登录态继续")
-
-        # 3) wait redirect after login (site should auto-jump to dashboard)
-        page.wait_for_load_state("networkidle")
-        if page.locator('input[type="password"]').count() > 0:
-            log_step("登录失败或仍在登录页")
-        else:
-            log_step("登录成功（已离开密码输入页）")
-
-        signed_text_a = page.get_by_text("今日已签到")
-        signed_text_b = page.get_by_text("签到完成")
-
-        def find_sign_target():
-            candidates = [
-                page.locator('button:has-text("签到")').first,
-                page.locator('[role="button"]:has-text("签到")').first,
-                page.locator('div:has-text("签到")').first,
-                page.locator('span:has-text("签到")').first,
-                page.get_by_text("签到").first,
-            ]
-            for loc in candidates:
-                if loc.count() > 0:
-                    return loc
-            return None
-
-        sign_target = None
-        for _ in range(8):
-            already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
-            if already_signed_now:
-                break
-            sign_target = find_sign_target()
-            if sign_target is not None:
-                break
-            page.wait_for_timeout(2500)
-
-        already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
-
-        if already_signed_now:
-            log_step("检测到今日已签到")
-            result["status"] = "already_signed"
-            result["signed_today"] = True
-        elif sign_target is not None:
-            log_step("检测到签到入口，开始点击签到")
-            sign_target.click()
-            page.wait_for_timeout(1500)
-
-            # Best-effort Cloudflare turnstile click.
-            # NOTE: GitHub Actions IP may trigger harder challenge; then manual solve is required.
-            cf_clicked = False
-            for frame in page.frames:
-                if re.search(r"cloudflare|turnstile", frame.url, re.IGNORECASE):
-                    checkbox = frame.locator('input[type="checkbox"], div[role="checkbox"], label').first
-                    if checkbox.count() > 0:
-                        try:
-                            checkbox.click(timeout=5000)
-                            cf_clicked = True
-                            break
-                        except PlaywrightTimeoutError:
-                            pass
-
-            page.wait_for_timeout(3000)
-
-            already_signed_after = signed_text_a.count() > 0 or signed_text_b.count() > 0
-            if already_signed_after:
-                log_step("签到成功")
-                result["status"] = "checked_in_now"
-                result["signed_today"] = True
-                if cf_clicked:
-                    result["note"] = "Turnstile checkbox clicked (best effort)."
+            if user_inputs.count() > 0 and pass_inputs.count() > 0:
+                user_input = user_inputs.first
+                pass_input = pass_inputs.first
+                user_input.fill(USERNAME)
+                pass_input.fill(PASSWORD)
+                submit = page.locator('button:has-text("登录"), button:has-text("Sign in"), button:has-text("Login"), button[type="submit"], [role="button"]:has-text("登录")').first
+                submit.click()
+                page.wait_for_timeout(2000)
+                page.wait_for_load_state("networkidle")
+                log_step("登录流程已提交，等待页面跳转")
             else:
-                log_step("签到结果不确定（未检测到成功文案）")
-                result["status"] = "checkin_uncertain"
-                result["note"] = "Sign clicked, but success text not found. Likely blocked by Cloudflare challenge."
-        else:
-            log_step("未找到签到入口")
-            result["status"] = "sign_button_not_found"
-            result["note"] = "Sign button/card not found. UI may have changed."
+                result["debug_hints"].append("登录页未识别到用户名/密码输入框，可能已处于登录态")
+                log_step("未识别到登录输入框，按已登录态继续")
+
+            page.wait_for_load_state("networkidle")
             if page.locator('input[type="password"]').count() > 0:
-                result["debug_hints"].append("当前页面疑似仍在登录页")
-            if any(re.search(r"cloudflare|turnstile", f.url, re.IGNORECASE) for f in page.frames):
-                result["debug_hints"].append("检测到 Cloudflare/Turnstile frame")
+                log_step("登录失败或仍在登录页")
+            else:
+                log_step("登录成功（已离开密码输入页）")
 
-        page_text = page.locator("body").inner_text()
-        result["balance"] = detect_balance(page_text)
+            signed_text_a = page.get_by_text("今日已签到")
+            signed_text_b = page.get_by_text("签到完成")
 
-        if result["signed_today"]:
-            log_step("任务结束：成功")
-            save_result_and_exit(0)
-        else:
-            log_step("任务结束：失败")
-            save_result_and_exit(2)
+            def find_sign_target():
+                candidates = [
+                    page.locator('button:has-text("签到")').first,
+                    page.locator('[role="button"]:has-text("签到")').first,
+                    page.locator('div:has-text("签到")').first,
+                    page.locator('span:has-text("签到")').first,
+                    page.get_by_text("签到").first,
+                ]
+                for loc in candidates:
+                    if loc.count() > 0:
+                        return loc
+                return None
 
-    except Exception as e:
+            sign_target = None
+            for _ in range(8):
+                already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
+                if already_signed_now:
+                    break
+                sign_target = find_sign_target()
+                if sign_target is not None:
+                    break
+                page.wait_for_timeout(2500)
+
+            already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
+
+            if already_signed_now:
+                log_step("检测到今日已签到")
+                result["status"] = "already_signed"
+                result["signed_today"] = True
+            elif sign_target is not None:
+                log_step("检测到签到入口，开始点击签到")
+                sign_target.click()
+                page.wait_for_timeout(1500)
+
+                cf_clicked = False
+                for frame in page.frames:
+                    if re.search(r"cloudflare|turnstile", frame.url, re.IGNORECASE):
+                        checkbox = frame.locator('input[type="checkbox"], div[role="checkbox"], label').first
+                        if checkbox.count() > 0:
+                            try:
+                                checkbox.click(timeout=5000)
+                                cf_clicked = True
+                                break
+                            except PlaywrightTimeoutError:
+                                pass
+
+                page.wait_for_timeout(3000)
+
+                already_signed_after = signed_text_a.count() > 0 or signed_text_b.count() > 0
+                if already_signed_after:
+                    log_step("签到成功")
+                    result["status"] = "checked_in_now"
+                    result["signed_today"] = True
+                    if cf_clicked:
+                        result["note"] = "Turnstile checkbox clicked (best effort)."
+                else:
+                    log_step("签到结果不确定（未检测到成功文案）")
+                    result["status"] = "checkin_uncertain"
+                    result["note"] = "Sign clicked, but success text not found. Likely blocked by Cloudflare challenge."
+            else:
+                log_step("未找到签到入口")
+                result["status"] = "sign_button_not_found"
+                result["note"] = "Sign button/card not found. UI may have changed."
+                if page.locator('input[type="password"]').count() > 0:
+                    result["debug_hints"].append("当前页面疑似仍在登录页")
+                if any(re.search(r"cloudflare|turnstile", f.url, re.IGNORECASE) for f in page.frames):
+                    result["debug_hints"].append("检测到 Cloudflare/Turnstile frame")
+
+            page_text = page.locator("body").inner_text()
+            result["balance"] = detect_balance(page_text)
+
+            if result["signed_today"]:
+                log_step("任务结束：成功")
+                return 0
+            else:
+                log_step("任务结束：失败")
+                return 2
+
+        finally:
+            context.close()
+            browser.close()
+
+
+try:
+    exit_code = run_once(use_proxy=True)
+    save_result_and_exit(exit_code)
+except Exception as e:
+    msg = str(e)
+    if "ERR_SOCKS_CONNECTION_FAILED" in msg and SOCKS5_PROXY:
+        log_step("代理连接失败，自动回退到直连重试")
+        result["debug_hints"].append("SOCKS5 连接失败，已回退直连")
+        try:
+            exit_code = run_once(use_proxy=False)
+            save_result_and_exit(exit_code)
+        except Exception as e2:
+            result["status"] = "failed"
+            result["note"] = str(e2)
+            log_step(f"直连重试仍失败：{e2}")
+            save_result_and_exit(1)
+    else:
         result["status"] = "failed"
-        result["note"] = str(e)
+        result["note"] = msg
         log_step(f"任务异常：{e}")
         save_result_and_exit(1)
-    finally:
-        context.close()
-        browser.close()
