@@ -13,7 +13,6 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 load_dotenv()
 
 LOGIN_URL = "https://tv.hohai.eu.org/login"
-DASHBOARD_URL = "https://tv.hohai.eu.org/dashboard"
 USERNAME = os.getenv("HOHAI_UN")
 PASSWORD = os.getenv("HOHAI_PW")
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
@@ -32,7 +31,7 @@ ts = now_cn.strftime("%Y%m%dT%H%M%S%z")
 
 result = {
     "time": now_cn.isoformat(),
-    "url": DASHBOARD_URL,
+    "url": LOGIN_URL,
     "status": "unknown",
     "signed_today": False,
     "balance": None,
@@ -117,19 +116,22 @@ with sync_playwright() as p:
         page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
 
         # 2) login
-        user_input = page.locator('input[name="email"], input[name="username"], input[type="text"]').first
-        pass_input = page.locator('input[type="password"]').first
-        if user_input.count() > 0 and pass_input.count() > 0:
+        user_inputs = page.locator('input[name="email"], input[name="username"], input[type="text"], input[placeholder*="用户"], input[placeholder*="账号"], input[placeholder*="邮箱"], input[id*="user" i], input[id*="email" i]')
+        pass_inputs = page.locator('input[type="password"], input[placeholder*="密码"], input[id*="pass" i]')
+
+        if user_inputs.count() > 0 and pass_inputs.count() > 0:
+            user_input = user_inputs.first
+            pass_input = pass_inputs.first
             user_input.fill(USERNAME)
             pass_input.fill(PASSWORD)
-            submit = page.locator('button:has-text("登录"), button:has-text("Sign in"), button:has-text("Login"), button[type="submit"]').first
+            submit = page.locator('button:has-text("登录"), button:has-text("Sign in"), button:has-text("Login"), button[type="submit"], [role="button"]:has-text("登录")').first
             submit.click()
+            page.wait_for_timeout(2000)
             page.wait_for_load_state("networkidle")
         else:
-            result["debug_hints"].append("登录页未识别到用户名/密码输入框")
+            result["debug_hints"].append("登录页未识别到用户名/密码输入框，可能已处于登录态")
 
-        # 3) go dashboard after login
-        page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60_000)
+        # 3) wait redirect after login (site should auto-jump to dashboard)
         page.wait_for_load_state("networkidle")
 
         signed_text_a = page.get_by_text("今日已签到")

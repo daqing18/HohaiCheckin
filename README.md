@@ -1,6 +1,7 @@
 # HohaiCheckin
 
 Python + Playwright 的 Hohai 每日自动签到脚本，并可运行在 GitHub Actions。
+目标登录地址固定为：`https://tv.hohai.eu.org/login`（登录后站点自动跳转）。
 
 ## 你要求的变更
 - 已删除此前 Node.js 依赖（`node_modules/`, `package.json`, `package-lock.json`, `src/`）
