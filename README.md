@@ -1,49 +1,65 @@
 # HohaiCheckin
 
-Python + Playwright 的 Hohai 每日自动签到脚本（GitHub Actions）。
-目标登录地址固定：`https://tv.hohai.eu.org/login`。
+已切换为 **VPS 本地运行（.sh + systemd）**，不再依赖 GitHub Actions / venv。
 
-## 说明
-- 已移除 Cloudflare Workers 版本（`worker.js` / `wrangler.toml`）。
-- 主流程仅保留 Python 脚本 `checkin.py`。
+## 目录说明
+- `checkin.py`：签到主逻辑（Playwright）
+- `checkin.sh`：VPS 执行入口脚本
+- `deploy/systemd/hohai-checkin.service`：systemd 服务文件
+- `deploy/systemd/hohai-checkin.timer`：systemd 定时器（每天 08:08）
 
-## 本地运行（可选）
+## 1) VPS 一次性安装依赖（系统 Python）
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m playwright install chromium
-cp .env.example .env
-python checkin.py
+sudo apt update
+sudo apt install -y python3 python3-pip python3-playwright
+# 若系统仓库没有 python3-playwright，则用 pip 方式：
+# python3 -m pip install --break-system-packages -r /opt/HohaiCheckin/requirements.txt
+python3 -m playwright install chromium
 ```
 
-## GitHub Actions 配置
-在仓库里设置 Secrets：
-- `HOHAI_UN`
-- `HOHAI_PW`
-- `SOCKS5_PROXY`（可选）
-  - 单代理：`socks5://x.x.x.x:port`
-  - 多代理 JSON 数组：
-    - `[
-      "socks5://1.1.1.1:1080",
-      "socks5://2.2.2.2:1080"
-      ]`
-  - 失败会自动切换下一个，全部失败后回退直连
-  - 注意：SOCKS5 用户名密码鉴权代理在当前 Playwright/Chromium 链路下不支持
-- `HOHAI_TGTK`（可选）
-- `HOHAI_TGID`（可选）
+## 2) 部署项目到 VPS
+```bash
+sudo mkdir -p /opt/HohaiCheckin
+sudo rsync -av --delete ./ /opt/HohaiCheckin/
+sudo chown -R actions:actions /opt/HohaiCheckin
+sudo chmod +x /opt/HohaiCheckin/checkin.sh
+```
 
-## 触发方式
-- 自动：每天 08:08（Asia/Shanghai）
-- 手动：Actions 页面点 `Run workflow`
+## 3) 配置环境变量
+创建 `/etc/hohai-checkin.env`：
+```bash
+sudo tee /etc/hohai-checkin.env >/dev/null <<'EOF'
+HOHAI_UN=your_username
+HOHAI_PW=your_password
+HEADLESS=true
 
-## 输出
-- `artifacts/result-*.json`
-- 同步 Telegram 通知（若配置）
+# 可选：代理（支持单个或 JSON 数组）
+SOCKS5_PROXY=
 
-## 状态说明
-- `already_signed`：当天已签到
-- `checked_in_now`：本次签到成功
-- `checkin_uncertain`：点击后未识别成功文案（常见于验证码未通过）
-- `sign_button_not_found`：未找到签到入口
-- `failed`：运行异常
+# 可选：Telegram 通知
+HOHAI_TGTK=
+HOHAI_TGID=
+EOF
+```
+
+## 4) 安装 systemd 服务与定时器
+```bash
+sudo cp /opt/HohaiCheckin/deploy/systemd/hohai-checkin.service /etc/systemd/system/
+sudo cp /opt/HohaiCheckin/deploy/systemd/hohai-checkin.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hohai-checkin.timer
+```
+
+## 5) 手动测试与查看日志
+```bash
+sudo systemctl start hohai-checkin.service
+sudo systemctl status hohai-checkin.service
+sudo journalctl -u hohai-checkin.service -n 200 --no-pager
+# 或查看文件日志
+sudo tail -n 200 /var/log/hohai-checkin.log
+```
+
+## 说明
+- 输出 JSON：`artifacts/result-*.json`
+- 若配置 Telegram，会自动发送结果通知
+- 失败常见原因仍是 Cloudflare/验证码策略，而不是脚本语法问题

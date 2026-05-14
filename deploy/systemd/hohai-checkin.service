@@ -1,0 +1,17 @@
+[Unit]
+Description=Hohai Daily Check-in
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/HohaiCheckin
+EnvironmentFile=-/etc/hohai-checkin.env
+ExecStart=/bin/bash /opt/HohaiCheckin/checkin.sh
+User=actions
+Group=actions
+StandardOutput=append:/var/log/hohai-checkin.log
+StandardError=append:/var/log/hohai-checkin.log
+
+[Install]
+WantedBy=multi-user.target
