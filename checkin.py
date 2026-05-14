@@ -82,8 +82,7 @@ def send_telegram(payload: dict):
 
 
 def detect_balance_from_dom(page):
-    return page.evaluate(
-        """
+    return page.evaluate(r"""
         () => {
           // 1) Preferred: find the card whose label is exactly "余额"
           const labels = [...document.querySelectorAll('span')].filter(s => (s.innerText || '').trim() === '余额');
