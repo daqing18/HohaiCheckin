@@ -81,12 +81,50 @@ def send_telegram(payload: dict):
         print(f"[warn] telegram send failed: {e}")
 
 
-def detect_balance(page_text: str):
-    for line in page_text.splitlines():
-        s = line.strip()
-        if re.search(r"余额|balance|wallet", s, re.IGNORECASE):
-            return s
-    return None
+def detect_balance_from_dom(page):
+    return page.evaluate(
+        """
+        () => {
+          // 1) Preferred: find the card whose label is exactly "余额"
+          const labels = [...document.querySelectorAll('span')].filter(s => (s.innerText || '').trim() === '余额');
+          for (const label of labels) {
+            const card = label.closest('div');
+            if (!card) continue;
+
+            // Numeric roller style: derive digits from transform translateY(-N0%)
+            const rollers = [...card.querySelectorAll('span.transition-transform')];
+            if (rollers.length > 0) {
+              const digits = rollers.map(r => {
+                const t = r.style.transform || '';
+                const m = t.match(/translateY\(-([0-9]+)%\)/);
+                if (!m) return '';
+                const pct = Number(m[1]);
+                const d = Math.round(pct / 10) % 10;
+                return String(d);
+              }).join('');
+
+              const hasDot = !!card.querySelector('span.inline-block') && (card.innerText || '').includes('.');
+              if (digits.length >= 3 && hasDot) {
+                // Common format from page sample: d.dd
+                return `${digits[0]}.${digits.slice(1)} ¥`;
+              }
+              if (digits.length > 0) return `${digits} ¥`;
+            }
+
+            // 2) Fallback: read visible text inside card and extract number
+            const txt = (card.innerText || '').replace(/\s+/g, ' ').trim();
+            const m2 = txt.match(/([0-9]+(?:\.[0-9]+)?)/);
+            if (m2) return `${m2[1]} ¥`;
+          }
+
+          // 3) Global fallback
+          const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+          const m3 = body.match(/余额[^0-9]{0,12}([0-9]+(?:\.[0-9]+)?)/);
+          if (m3) return `${m3[1]} ¥`;
+          return null;
+        }
+        """
+    )
 
 
 def try_login_api(context):
@@ -241,8 +279,7 @@ with sync_playwright() as p:
             if page.locator('input[type="password"]').count() > 0:
                 result["debug_hints"].append("当前页面疑似仍在登录页")
 
-        body = page.locator("body").inner_text()
-        result["balance"] = detect_balance(body)
+        result["balance"] = detect_balance_from_dom(page)
 
         if result["signed_today"]:
             save_and_exit(0)
