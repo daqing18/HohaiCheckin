@@ -8,7 +8,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from playwright_stealth import stealth_sync
 
 load_dotenv()
 
@@ -223,11 +222,22 @@ def run_once(proxy: str | None):
 
         browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={"width": 1366, "height": 900})
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            if (!window.chrome) window.chrome = {};
+            if (!window.chrome.runtime) window.chrome.runtime = {};
+            Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            const _q = navigator.permissions && navigator.permissions.query;
+            if (_q) {
+              navigator.permissions.query = (p) => (
+                p && p.name === 'notifications'
+                  ? Promise.resolve({ state: Notification.permission })
+                  : _q.call(navigator.permissions, p)
+              );
+            }
+        """)
         page = context.new_page()
-        try:
-            stealth_sync(page)
-        except Exception as e:
-            result["debug_hints"].append(f"stealth 注入失败: {e}")
 
         network_log: list[dict] = []
         static_re = re.compile(r"\.(?:js|css|woff2?|ttf|png|jpe?g|gif|svg|ico|map)(?:\?|$)", re.IGNORECASE)
