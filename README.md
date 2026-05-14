@@ -24,6 +24,7 @@ python checkin.py
 - `HOHAI_UN`
 - `HOHAI_PW`
 - `SOCKS5_PROXY`（可选，例如 `socks5://username:password@x.x.x.x:port`）
+  - 支持用户名/密码包含 `@ : /`，脚本会自动做 URL 编码转换
 
 路径：`Settings -> Secrets and variables -> Actions -> New repository secret`
 

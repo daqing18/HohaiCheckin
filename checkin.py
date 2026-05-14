@@ -45,6 +45,36 @@ def log_step(message: str):
     print(f"[{now}] {message}")
 
 
+def normalize_socks5_proxy(proxy: str) -> str:
+    """
+    Allow raw credentials containing @ : / and normalize to a valid proxy URL.
+    Example input: socks5://user@name:pa:ss/word@1.2.3.4:1080
+    """
+    p = proxy.strip()
+    if not p:
+        return p
+
+    if not p.startswith("socks5://"):
+        return p
+
+    body = p[len("socks5://"):]
+    if "@" not in body:
+        return p
+
+    creds, _, hostport = body.rpartition("@")
+    if not hostport:
+        return p
+
+    if ":" not in creds:
+        encoded_user = urllib.parse.quote(urllib.parse.unquote(creds), safe="")
+        return f"socks5://{encoded_user}@{hostport}"
+
+    user, password = creds.split(":", 1)
+    encoded_user = urllib.parse.quote(urllib.parse.unquote(user), safe="")
+    encoded_pw = urllib.parse.quote(urllib.parse.unquote(password), safe="")
+    return f"socks5://{encoded_user}:{encoded_pw}@{hostport}"
+
+
 def send_telegram_notification(payload: dict):
     if not TG_BOT_TOKEN or not TG_CHAT_ID:
         return
@@ -111,7 +141,9 @@ with sync_playwright() as p:
     }
     log_step("启动浏览器")
     if SOCKS5_PROXY:
-        launch_kwargs["proxy"] = {"server": SOCKS5_PROXY}
+        normalized_proxy = normalize_socks5_proxy(SOCKS5_PROXY)
+        launch_kwargs["proxy"] = {"server": normalized_proxy}
+        log_step("已启用 SOCKS5 代理")
 
     browser = p.chromium.launch(**launch_kwargs)
     context = browser.new_context(viewport={"width": 1366, "height": 900})
