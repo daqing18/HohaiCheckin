@@ -1,7 +1,13 @@
 # HohaiCheckin
 
-Python + Playwright 的 Hohai 每日自动签到脚本，并可运行在 GitHub Actions。
-目标登录地址固定为：`https://tv.hohai.eu.org/login`（登录后站点自动跳转）。
+本仓库现提供两种模式：
+1. `checkin.py`（Python + Playwright）
+2. `worker.js`（Cloudflare Workers API 签到模式）
+
+Workers 模式基于接口调用：
+- `POST /api/auth/login`
+- `GET /api/checkin/status`
+- `POST /api/checkin`
 
 ## 你要求的变更
 - 已删除此前 Node.js 依赖（`node_modules/`, `package.json`, `package-lock.json`, `src/`）
@@ -18,6 +24,28 @@ cp .env.example .env
 # 填写用户名密码
 python checkin.py
 ```
+
+## Cloudflare Workers 部署（新增）
+1. 安装并登录 Wrangler：
+```bash
+npm i -g wrangler
+wrangler login
+```
+2. 在项目目录发布：
+```bash
+wrangler deploy
+```
+3. 配置 Workers Secrets：
+```bash
+wrangler secret put HOHAI_UN
+wrangler secret put HOHAI_PW
+wrangler secret put HOHAI_TGTK
+wrangler secret put HOHAI_TGID
+```
+4. 手动触发测试：
+- 访问 `https://<你的worker域名>/run`
+
+> 定时任务在 `wrangler.toml` 中：`8 0 * * *`（UTC，即北京时间 08:08）
 
 ## GitHub Actions 配置
 在仓库里设置以下 Secrets：
