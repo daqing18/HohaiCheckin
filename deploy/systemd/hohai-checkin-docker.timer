@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Hohai Check-in daily (Docker Compose)
+
+[Timer]
+OnCalendar=*-*-* 08:08:00 Asia/Shanghai
+Persistent=true
+Unit=hohai-checkin-docker.service
+
+[Install]
+WantedBy=timers.target

@@ -31,10 +31,24 @@ chmod +x run_docker.sh
 - 控制台日志
 - `artifacts/result-*.json`
 
-## 3. 定时任务（宿主机 cron）
-示例：每天 08:08 执行
-```cron
-8 8 * * * cd /opt/HohaiCheckin && /usr/bin/env bash ./run_docker.sh >> /opt/HohaiCheckin/artifacts/cron.log 2>&1
+## 3. 使用 systemd 定时启动（推荐）
+把仓库放在 `/opt/HohaiCheckin` 后执行：
+
+```bash
+sudo cp deploy/systemd/hohai-checkin-docker.service /etc/systemd/system/
+sudo cp deploy/systemd/hohai-checkin-docker.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hohai-checkin-docker.timer
+```
+
+手动触发一次：
+```bash
+sudo systemctl start hohai-checkin-docker.service
+```
+
+查看日志：
+```bash
+sudo journalctl -u hohai-checkin-docker.service -n 200 --no-pager
 ```
 
 ## 4. 退出码
