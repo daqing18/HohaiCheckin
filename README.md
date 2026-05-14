@@ -1,44 +1,69 @@
-# HohaiCheckin (Rebuilt)
+# HohaiCheckin
 
-目标：
-1) 访问并登录 `https://tv.hohai.eu.org/login`
-2) 自动跳转/进入 `https://tv.hohai.eu.org/dashboard`
-3) 完成签到动作
-4) 读取账户余额信息
+最终生产建议：
+- **每日自动任务**：VPS `systemd timer`（固定 IP，最稳定）
+- **手动补跑**：GitHub Actions + self-hosted runner
 
-## 环境准备
+---
+
+## 一、VPS 自动运行（主方案）
+
+### 1) 安装依赖（VPS）
 ```bash
-pip install -r requirements.txt
-python -m playwright install chromium
+sudo apt update
+sudo apt install -y python3 python3-pip
+python3 -m pip install --break-system-packages -r /opt/HohaiCheckin/requirements.txt
+python3 -m playwright install chromium
 ```
 
-## 配置
+### 2) 部署代码
 ```bash
-cp .env.example .env
+sudo mkdir -p /opt/HohaiCheckin
+sudo rsync -av --delete ./ /opt/HohaiCheckin/
+sudo chown -R actions:actions /opt/HohaiCheckin
 ```
 
-编辑 `.env`：
-```env
-HOHAI_UN=your_username
-HOHAI_PW=your_password
-HEADLESS=true
-HOHAI_TGTK=
-HOHAI_TGID=
-```
-
-## 运行
+### 3) 配置环境变量
 ```bash
-python checkin.py
+sudo cp /opt/HohaiCheckin/deploy/hohai-checkin.env.example /etc/hohai-checkin.env
+sudo nano /etc/hohai-checkin.env
+```
+填写：
+- `HOHAI_UN`
+- `HOHAI_PW`
+- `HOHAI_TGTK`（可选）
+- `HOHAI_TGID`（可选）
+
+### 4) 安装 systemd 服务与定时器
+```bash
+sudo cp /opt/HohaiCheckin/deploy/systemd/hohai-checkin.service /etc/systemd/system/
+sudo cp /opt/HohaiCheckin/deploy/systemd/hohai-checkin.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hohai-checkin.timer
 ```
 
-输出：
+### 5) 手动验证一次
+```bash
+sudo systemctl start hohai-checkin.service
+sudo systemctl status hohai-checkin.service
+sudo journalctl -u hohai-checkin.service -n 200 --no-pager
+```
+
+---
+
+## 二、GitHub Actions（仅手动补跑）
+
+已改为 `workflow_dispatch` + `self-hosted runner`。  
+用途：你想临时手动跑一次时使用，不承担日常定时任务。
+
+---
+
+## 三、运行结果
+脚本输出：
 - 终端日志
 - `artifacts/result-*.json`
 
-## 自我验证（已内置）
-脚本运行后会进行结果判断：
-- `already_signed` / `checked_in_now` -> 退出码 `0`
-- `checkin_uncertain` / `sign_button_not_found` -> 退出码 `2`
-- `failed` -> 退出码 `1`
-
-你可以用退出码快速判定自动化是否成功。
+退出码：
+- `0`：成功（`already_signed` / `checked_in_now`）
+- `2`：未完成签到（如 `sign_button_not_found` / `checkin_uncertain`）
+- `1`：异常失败
