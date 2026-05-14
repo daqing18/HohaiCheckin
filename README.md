@@ -20,11 +20,9 @@ python checkin.py
 
 ## GitHub Actions 配置
 在仓库里设置以下 Secrets：
-- `HOHAI_BASE_URL`（建议 `https://tv.hohai.eu.org`）
-- `HOHAI_LOGIN_URL`（`https://tv.hohai.eu.org/login`）
-- `HOHAI_DASHBOARD_URL`（`https://tv.hohai.eu.org/dashboard`）
-- `HOHAI_USERNAME`
-- `HOHAI_PASSWORD`
+- `HOHAI_UN`
+- `HOHAI_PW`
+- `SOCKS5_PROXY`（可选，例如 `socks5://username:password@x.x.x.x:port`）
 
 路径：`Settings -> Secrets and variables -> Actions -> New repository secret`
 
@@ -42,8 +40,8 @@ python checkin.py
 脚本支持执行后自动发 Telegram 消息。
 
 新增 Secrets：
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
+- `HOHAI_TGTK`
+- `HOHAI_TGID`
 - `TELEGRAM_THREAD_ID`（可选，群组 topic）
 
 若不配置 Telegram secrets，脚本会跳过通知，不影响签到流程。

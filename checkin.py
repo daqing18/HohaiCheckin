@@ -12,18 +12,18 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 load_dotenv()
 
-BASE_URL = os.getenv("HOHAI_BASE_URL", "https://tv.hohai.eu.org")
-LOGIN_URL = os.getenv("HOHAI_LOGIN_URL", f"{BASE_URL}/login")
-DASHBOARD_URL = os.getenv("HOHAI_DASHBOARD_URL", f"{BASE_URL}/dashboard")
-USERNAME = os.getenv("HOHAI_USERNAME")
-PASSWORD = os.getenv("HOHAI_PASSWORD")
+LOGIN_URL = "https://tv.hohai.eu.org/login"
+DASHBOARD_URL = "https://tv.hohai.eu.org/dashboard"
+USERNAME = os.getenv("HOHAI_UN")
+PASSWORD = os.getenv("HOHAI_PW")
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
-TG_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TG_BOT_TOKEN = os.getenv("HOHAI_TGTK")
+TG_CHAT_ID = os.getenv("HOHAI_TGID")
 TG_THREAD_ID = os.getenv("TELEGRAM_THREAD_ID")
+SOCKS5_PROXY = os.getenv("SOCKS5_PROXY")
 
 if not USERNAME or not PASSWORD:
-    raise SystemExit("Missing HOHAI_USERNAME or HOHAI_PASSWORD")
+    raise SystemExit("Missing HOHAI_UN or HOHAI_PW")
 
 artifacts = Path("artifacts")
 artifacts.mkdir(parents=True, exist_ok=True)
@@ -105,7 +105,14 @@ def detect_balance(text: str):
 
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=HEADLESS, args=["--disable-blink-features=AutomationControlled"])
+    launch_kwargs = {
+        "headless": HEADLESS,
+        "args": ["--disable-blink-features=AutomationControlled"],
+    }
+    if SOCKS5_PROXY:
+        launch_kwargs["proxy"] = {"server": SOCKS5_PROXY}
+
+    browser = p.chromium.launch(**launch_kwargs)
     context = browser.new_context(viewport={"width": 1366, "height": 900})
     page = context.new_page()
 

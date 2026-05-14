@@ -28,13 +28,11 @@ jobs:
 
       - name: Run check-in
         env:
-          HOHAI_BASE_URL: ${{ secrets.HOHAI_BASE_URL }}
-          HOHAI_LOGIN_URL: ${{ secrets.HOHAI_LOGIN_URL }}
-          HOHAI_DASHBOARD_URL: ${{ secrets.HOHAI_DASHBOARD_URL }}
-          HOHAI_USERNAME: ${{ secrets.HOHAI_USERNAME }}
-          HOHAI_PASSWORD: ${{ secrets.HOHAI_PASSWORD }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HOHAI_UN: ${{ secrets.HOHAI_UN }}
+          HOHAI_PW: ${{ secrets.HOHAI_PW }}
+          SOCKS5_PROXY: ${{ secrets.SOCKS5_PROXY }}
+          HOHAI_TGTK: ${{ secrets.HOHAI_TGTK }}
+          HOHAI_TGID: ${{ secrets.HOHAI_TGID }}
           TELEGRAM_THREAD_ID: ${{ secrets.TELEGRAM_THREAD_ID }}
           HEADLESS: 'true'
         run: python checkin.py
