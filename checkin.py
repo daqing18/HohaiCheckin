@@ -12,6 +12,8 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 load_dotenv()
 
 LOGIN_URL = "https://tv.hohai.eu.org/login"
+DASHBOARD_URL = "https://tv.hohai.eu.org/dashboard"
+API_LOGIN_URL = "https://tv.hohai.eu.org/api/auth/login"
 USERNAME = os.getenv("HOHAI_UN")
 PASSWORD = os.getenv("HOHAI_PW")
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
@@ -147,6 +149,32 @@ def has_turnstile(page):
     return any(re.search(r"cloudflare|turnstile", f.url, re.IGNORECASE) for f in page.frames)
 
 
+def login_via_api(context):
+    payloads = [
+        {"username": USERNAME, "password": PASSWORD},
+        {"userName": USERNAME, "password": PASSWORD},
+        {"email": USERNAME, "password": PASSWORD},
+        {"email": USERNAME, "passwd": PASSWORD},
+    ]
+    for p in payloads:
+        try:
+            r = context.request.post(API_LOGIN_URL, data=p, timeout=15000)
+            if not r.ok:
+                continue
+            data = r.json()
+            token = (
+                data.get("token")
+                or (data.get("data") or {}).get("token")
+                or (data.get("data") or {}).get("accessToken")
+                or data.get("accessToken")
+            )
+            if token:
+                return token
+        except Exception:
+            continue
+    return None
+
+
 def fill_login_form(page):
     user_selectors = [
         'input[name="username"]',
@@ -240,8 +268,24 @@ def run_once(use_proxy: bool, proxy_server: str | None = None):
                     result["debug_hints"].append("登录后页面持续请求，已跳过 networkidle 严格等待")
                     log_step("登录后等待超时，继续后续检测")
             else:
-                result["debug_hints"].append("未识别到可提交的登录表单，可能已登录或被验证码拦截")
-                log_step("未识别到可提交的登录表单，按已登录态继续")
+                result["debug_hints"].append("未识别到可提交的登录表单，尝试 API 登录")
+                log_step("未识别到可提交的登录表单，尝试 API 登录")
+                token = login_via_api(context)
+                if token:
+                    log_step("API 登录成功，注入 token 并跳转 dashboard")
+                    page.evaluate(
+                        """
+                        (t) => {
+                          localStorage.setItem('auth_token', t);
+                          sessionStorage.setItem('auth_token', t);
+                        }
+                        """,
+                        token,
+                    )
+                    page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
+                else:
+                    result["debug_hints"].append("API 登录未拿到 token，可能被验证码或风控拦截")
+                    log_step("API 登录失败，按当前页继续")
 
             page.wait_for_timeout(1500)
 
