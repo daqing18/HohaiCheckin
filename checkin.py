@@ -44,7 +44,7 @@ TS = NOW.strftime("%Y%m%dT%H%M%S%z")
 result = {
     "time": NOW.isoformat(),
     "url": LOGIN_URL,
-    "status": "unknown",
+    "status": "未知状态",
     "signed_today": False,
     "balance": None,
     "note": "",
@@ -275,7 +275,7 @@ def run_once(proxy: str | None):
                 page.wait_for_timeout(2000)
 
             if signed_a.count() > 0 or signed_b.count() > 0:
-                result["status"] = "already_signed"
+                result["status"] = "今日已签到"
                 result["signed_today"] = True
                 log("已识别到今日已签到")
             elif sign_target is not None:
@@ -295,14 +295,14 @@ def run_once(proxy: str | None):
 
                 page.wait_for_timeout(3000)
                 if signed_a.count() > 0 or signed_b.count() > 0:
-                    result["status"] = "checked_in_now"
+                    result["status"] = "本次签到成功"
                     result["signed_today"] = True
                     log("签到成功")
                 else:
-                    result["status"] = "checkin_uncertain"
+                    result["status"] = "签到结果不确定"
                     result["note"] = "Clicked sign-in but no success text found"
             else:
-                result["status"] = "sign_button_not_found"
+                result["status"] = "未找到签到入口"
                 result["note"] = "No sign-in control found"
                 if page.locator('input[type="password"]').count() > 0:
                     result["debug_hints"].append("当前页面疑似仍在登录页")
@@ -328,7 +328,7 @@ for i, proxy in enumerate(pool, start=1):
         log(f"代理失败: {proxy} -> {e}")
 
 if STRICT_PROXY:
-    result["status"] = "failed"
+    result["status"] = "执行失败"
     result["note"] = "All proxies failed in STRICT_PROXY mode"
     result["debug_hints"].append("严格代理模式已启用：禁止直连回退")
     save_and_exit(1)
@@ -340,6 +340,6 @@ try:
     code = run_once(None)
     save_and_exit(code)
 except Exception as e:
-    result["status"] = "failed"
+    result["status"] = "执行失败"
     result["note"] = str(e if e else last_error)
     save_and_exit(1)
