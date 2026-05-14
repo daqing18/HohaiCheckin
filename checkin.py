@@ -27,8 +27,8 @@ STRICT_PROXY = os.getenv("STRICT_PROXY", "true").lower() == "true"
 # 2) 45.146.243.133:1080 (3/3 success, slower)
 # 3) 47.238.203.170:50000 (2/3 success, very slow, as fallback)
 DEFAULT_PROXY_POOL = [
-    "http://47.83.168.191:4000",
     "http://45.146.243.133:1080",
+    "http://47.83.168.191:4000",
     "http://47.238.203.170:50000",
 ]
 
