@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_VERSION="2026-05-14.3"
 PROJECT_DIR_DEFAULT="/opt/HohaiCheckin"
 SERVICE_NAME="hohai-checkin"
 ENV_FILE="/etc/hohai-checkin.env"
@@ -45,6 +46,7 @@ check_cmd() {
 
 detect_phase() {
   blue "=== 预检查（先检测后安装） ==="
+  echo "- setup script version: ${SCRIPT_VERSION}"
   echo "- OS: $(grep PRETTY_NAME= /etc/os-release | cut -d= -f2- | tr -d '"')"
   echo "- Kernel: $(uname -r)"
 
@@ -166,9 +168,10 @@ install_flow() {
 
   yellow "[3/7] 安装 Python 依赖（requirements + playwright）..."
   python3 -m pip install --break-system-packages -r "$project_dst/requirements.txt"
-  python3 -m playwright install chromium
   yellow "[3.1/7] 安装 Playwright 系统依赖..."
+  python3 -m playwright install-deps || true
   apt install -y libnspr4 libnss3 >/dev/null 2>&1 || true
+  python3 -m playwright install chromium
 
   yellow "[4/7] 写入环境变量文件 $ENV_FILE ..."
   cat > "$ENV_FILE" <<EOF
@@ -185,6 +188,7 @@ EOF
   timer_file="/etc/systemd/system/${SERVICE_NAME}.timer"
 
   local hour min
+  run_time="${run_time// /}"
   hour=${run_time%:*}
   min=${run_time#*:}
   if [[ ! "$hour" =~ ^[0-9]{1,2}$ || ! "$min" =~ ^[0-9]{1,2}$ ]]; then
