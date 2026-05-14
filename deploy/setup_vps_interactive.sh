@@ -167,6 +167,8 @@ install_flow() {
   yellow "[3/7] 安装 Python 依赖（requirements + playwright）..."
   python3 -m pip install --break-system-packages -r "$project_dst/requirements.txt"
   python3 -m playwright install chromium
+  yellow "[3.1/7] 安装 Playwright 系统依赖..."
+  apt install -y libnspr4 libnss3 >/dev/null 2>&1 || true
 
   yellow "[4/7] 写入环境变量文件 $ENV_FILE ..."
   cat > "$ENV_FILE" <<EOF
@@ -189,8 +191,8 @@ EOF
     red "时间格式错误，应为 HH:MM"
     exit 1
   fi
-  printf -v hour "%02d" "$hour"
-  printf -v min "%02d" "$min"
+  printf -v hour "%02d" "$((10#$hour))"
+  printf -v min "%02d" "$((10#$min))"
 
   yellow "[5/7] 生成 systemd service/timer..."
   cat > "$service_file" <<EOF
