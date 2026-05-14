@@ -142,7 +142,7 @@ def detect_balance_from_dom(page):
     """)
 
 
-def try_login_api(context):
+def try_login_api_via_page(page):
     payloads = [
         {"username": USERNAME, "password": PASSWORD},
         {"userName": USERNAME, "password": PASSWORD},
@@ -150,11 +150,26 @@ def try_login_api(context):
     ]
     for p in payloads:
         try:
-            r = context.request.post(API_LOGIN_URL, data=p, timeout=15000)
-            if not r.ok:
+            data = page.evaluate(
+                """
+                async ({ url, payload }) => {
+                  const r = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(payload),
+                  });
+                  let j = null;
+                  try { j = await r.json(); } catch (_) {}
+                  return { ok: r.ok, status: r.status, body: j };
+                }
+                """,
+                {"url": API_LOGIN_URL, "payload": p},
+            )
+            if not data or not data.get("ok"):
                 continue
-            d = r.json()
-            token = d.get("token") or (d.get("data") or {}).get("token") or d.get("accessToken") or (d.get("data") or {}).get("accessToken")
+            body = data.get("body") or {}
+            token = body.get("token") or (body.get("data") or {}).get("token") or body.get("accessToken") or (body.get("data") or {}).get("accessToken")
             if token:
                 return token
         except Exception:
@@ -163,6 +178,12 @@ def try_login_api(context):
 
 
 def submit_login_form(page):
+    # Wait for dynamic SPA form rendering
+    try:
+        page.wait_for_selector('input[name="password"],input[type="password"],input[autocomplete="current-password"]', timeout=15000)
+    except PlaywrightTimeoutError:
+        pass
+
     user = page.locator('input[name="username"],input[name="email"],input[type="email"],input[autocomplete="username"],form input[type="text"]').first
     pwd = page.locator('input[name="password"],input[type="password"],input[autocomplete="current-password"]').first
     if user.count() > 0 and pwd.count() > 0:
@@ -227,13 +248,15 @@ def run_once(proxy: str | None):
                 except PlaywrightTimeoutError:
                     result["debug_hints"].append("登录后页面存在持续请求，已跳过 networkidle 严格等待")
             else:
-                if STRICT_PROXY:
-                    result["debug_hints"].append("严格代理模式：跳过 API 登录兜底，仅允许页面表单登录")
+                # Use in-page fetch so network path stays same as browser proxy/IP
+                token = try_login_api_via_page(page)
+                if token:
+                    result["debug_hints"].append("页面 API 登录兜底成功")
+                    page.evaluate("""(t)=>{localStorage.setItem('auth_token',t);sessionStorage.setItem('auth_token',t);} """, token)
+                    page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
                 else:
-                    token = try_login_api(context)
-                    if token:
-                        page.evaluate("""(t)=>{localStorage.setItem('auth_token',t);sessionStorage.setItem('auth_token',t);} """, token)
-                        page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
+                    if STRICT_PROXY:
+                        result["debug_hints"].append("严格代理模式：页面表单与页面API登录均失败")
                     else:
                         result["debug_hints"].append("表单登录和 API 登录均失败（可能被风控拦截）")
 
