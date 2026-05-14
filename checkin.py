@@ -323,25 +323,46 @@ def run_once(proxy: str | None):
 
                 sign_target.click()
 
-                try:
-                    page.wait_for_selector('iframe[src*="challenges.cloudflare.com"]', timeout=15000)
-                except PlaywrightTimeoutError:
-                    result["debug_hints"].append("未检测到 Turnstile iframe")
-
-                for f in page.frames:
-                    if "challenges.cloudflare.com" in (f.url or ""):
-                        try:
-                            cb = f.locator('input[type="checkbox"]').first
-                            cb.wait_for(state="visible", timeout=10000)
-                            cb.click(timeout=8000)
-                            result["debug_hints"].append("已点击 Turnstile checkbox")
-                        except Exception as e:
-                            result["debug_hints"].append(f"Turnstile checkbox 点击失败: {e}")
+                # The Turnstile widget mounts inside a closed shadow root, so
+                # neither iframe selectors nor page.frames can reach it. Wait
+                # for the widget container to acquire a real layout box, then
+                # mouse-click the checkbox position (events pierce shadow DOM).
+                widget_box = None
+                for _ in range(15):
+                    widget_box = page.evaluate("""
+                        () => {
+                          const el = document.querySelector('.cloudflare-turnstile-container, .turnstile-widget');
+                          if (!el) return null;
+                          const r = el.getBoundingClientRect();
+                          return { x: r.x, y: r.y, w: r.width, h: r.height };
+                        }
+                    """)
+                    if widget_box and widget_box.get("w", 0) > 50 and widget_box.get("h", 0) > 30:
                         break
+                    page.wait_for_timeout(1000)
 
-                # Allow Cloudflare to run its silent challenge and let the frontend
-                # POST the checkin API afterwards.
-                page.wait_for_timeout(20000)
+                if widget_box and widget_box.get("w", 0) > 50:
+                    x = widget_box["x"] + 30
+                    y = widget_box["y"] + widget_box["h"] / 2
+                    page.mouse.move(x, y)
+                    page.wait_for_timeout(200)
+                    page.mouse.click(x, y)
+                    result["debug_hints"].append(
+                        f"mouse 点击 widget ({x:.0f},{y:.0f}) box={widget_box}"
+                    )
+                else:
+                    result["debug_hints"].append(f"未找到 Turnstile widget box: {widget_box}")
+
+                # Wait for Cloudflare's silent challenge + token + frontend POST.
+                try:
+                    page.wait_for_function(
+                        "() => { const el = document.querySelector('[name=\"cf-turnstile-response\"]'); return !!(el && el.value && el.value.length > 0); }",
+                        timeout=30000,
+                    )
+                    result["debug_hints"].append("Turnstile token 已生成")
+                except PlaywrightTimeoutError:
+                    result["debug_hints"].append("Turnstile token 未生成(超时)")
+                page.wait_for_timeout(8000)
 
                 try:
                     page.screenshot(path=str(ARTIFACTS / f"after-click-{TS}.png"), full_page=True)
