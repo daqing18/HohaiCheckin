@@ -21,6 +21,16 @@ HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 TG_BOT_TOKEN = os.getenv("HOHAI_TGTK")
 TG_CHAT_ID = os.getenv("HOHAI_TGID")
 
+# Top-3 selected from connectivity benchmark (this environment):
+# 1) 47.83.168.191:4000  (3/3 success, fastest)
+# 2) 45.146.243.133:1080 (3/3 success, slower)
+# 3) 47.238.203.170:50000 (2/3 success, very slow, as fallback)
+DEFAULT_PROXY_POOL = [
+    "http://47.83.168.191:4000",
+    "http://45.146.243.133:1080",
+    "http://47.238.203.170:50000",
+]
+
 if not USERNAME or not PASSWORD:
     raise SystemExit("Missing HOHAI_UN or HOHAI_PW")
 
@@ -38,12 +48,26 @@ result = {
     "balance": None,
     "note": "",
     "debug_hints": [],
+    "proxy_used": None,
 }
 
 
 def log(msg: str):
     t = datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M:%S%z")
     print(f"[{t}] {msg}")
+
+
+def parse_proxy_pool():
+    raw = os.getenv("HTTP_PROXY_POOL", "").strip()
+    if not raw:
+        return DEFAULT_PROXY_POOL
+    try:
+        arr = json.loads(raw)
+        if isinstance(arr, list):
+            return [str(x).strip() for x in arr if str(x).strip()]
+    except Exception:
+        pass
+    return DEFAULT_PROXY_POOL
 
 
 def save_and_exit(code: int):
@@ -64,6 +88,7 @@ def send_telegram(payload: dict):
         f"📌 状态：{payload.get('status')}\n"
         f"🗓️ 今日是否已签到：{'是' if payload.get('signed_today') else '否'}\n"
         f"💰 账户余额：{payload.get('balance') or '未识别'}\n"
+        f"🌐 代理：{payload.get('proxy_used') or '直连'}\n"
         f"📝 备注：{payload.get('note') or '无'}\n"
         f"⏰ 时间：{payload.get('time')}"
     )
@@ -84,13 +109,11 @@ def send_telegram(payload: dict):
 def detect_balance_from_dom(page):
     return page.evaluate(r"""
         () => {
-          // 1) Preferred: find the card whose label is exactly "余额"
           const labels = [...document.querySelectorAll('span')].filter(s => (s.innerText || '').trim() === '余额');
           for (const label of labels) {
             const card = label.closest('div');
             if (!card) continue;
 
-            // Numeric roller style: derive digits from transform translateY(-N0%)
             const rollers = [...card.querySelectorAll('span.transition-transform')];
             if (rollers.length > 0) {
               const digits = rollers.map(r => {
@@ -98,32 +121,24 @@ def detect_balance_from_dom(page):
                 const m = t.match(/translateY\(-([0-9]+)%\)/);
                 if (!m) return '';
                 const pct = Number(m[1]);
-                const d = Math.round(pct / 10) % 10;
-                return String(d);
+                return String(Math.round(pct / 10) % 10);
               }).join('');
-
-              const hasDot = !!card.querySelector('span.inline-block') && (card.innerText || '').includes('.');
-              if (digits.length >= 3 && hasDot) {
-                // Common format from page sample: d.dd
-                return `${digits[0]}.${digits.slice(1)} ¥`;
-              }
+              const hasDot = (card.innerText || '').includes('.');
+              if (digits.length >= 3 && hasDot) return `${digits[0]}.${digits.slice(1)} ¥`;
               if (digits.length > 0) return `${digits} ¥`;
             }
 
-            // 2) Fallback: read visible text inside card and extract number
             const txt = (card.innerText || '').replace(/\s+/g, ' ').trim();
             const m2 = txt.match(/([0-9]+(?:\.[0-9]+)?)/);
             if (m2) return `${m2[1]} ¥`;
           }
 
-          // 3) Global fallback
           const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
           const m3 = body.match(/余额[^0-9]{0,12}([0-9]+(?:\.[0-9]+)?)/);
           if (m3) return `${m3[1]} ¥`;
           return null;
         }
-        """
-    )
+    """)
 
 
 def try_login_api(context):
@@ -147,25 +162,8 @@ def try_login_api(context):
 
 
 def submit_login_form(page):
-    user_selectors = [
-        'input[name="username"]',
-        'input[name="email"]',
-        'input[type="email"]',
-        'input[autocomplete="username"]',
-        'input[placeholder*="用户"]',
-        'input[placeholder*="账号"]',
-        'input[placeholder*="邮箱"]',
-        'form input[type="text"]',
-    ]
-    pass_selectors = [
-        'input[name="password"]',
-        'input[type="password"]',
-        'input[autocomplete="current-password"]',
-        'input[placeholder*="密码"]',
-    ]
-
-    user = page.locator(", ".join(user_selectors)).first
-    pwd = page.locator(", ".join(pass_selectors)).first
+    user = page.locator('input[name="username"],input[name="email"],input[type="email"],input[autocomplete="username"],form input[type="text"]').first
+    pwd = page.locator('input[name="password"],input[type="password"],input[autocomplete="current-password"]').first
     if user.count() > 0 and pwd.count() > 0:
         user.fill(USERNAME)
         pwd.fill(PASSWORD)
@@ -173,144 +171,142 @@ def submit_login_form(page):
         if submit.count() > 0:
             submit.click()
             return True
-
     return False
-
-
-def card_has_signed_text(page):
-    card = page.locator('[data-checkin-card="default"]').first
-    if card.count() == 0:
-        return False
-    txt = card.inner_text()
-    return ("今日已签到" in txt) or ("签到完成" in txt)
 
 
 def find_sign_target(page):
     card = page.locator('[data-checkin-card="default"]').first
     if card.count() > 0:
-        card_candidates = [
+        for c in [
             card.locator('button:has-text("签到")').first,
             card.locator('[role="button"]:has-text("签到")').first,
             card.locator('div:has-text("签到")').first,
             card.locator('span:has-text("签到")').first,
-        ]
-        for c in card_candidates:
+        ]:
             if c.count() > 0:
                 return c
-        # Fallback: click card container itself when card exists but no explicit button.
         return card
 
-    candidates = [
+    for c in [
         page.locator('button:has-text("签到")').first,
         page.locator('[role="button"]:has-text("签到")').first,
         page.locator('div:has-text("签到")').first,
         page.locator('span:has-text("签到")').first,
         page.get_by_text("签到").first,
-    ]
-    for c in candidates:
+    ]:
         if c.count() > 0:
             return c
     return None
 
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=HEADLESS)
-    context = browser.new_context(viewport={"width": 1366, "height": 900})
-    page = context.new_page()
+def run_once(proxy: str | None):
+    with sync_playwright() as p:
+        launch_kwargs = {"headless": HEADLESS}
+        if proxy:
+            launch_kwargs["proxy"] = {"server": proxy}
+            result["proxy_used"] = proxy
+            log(f"使用代理: {proxy}")
 
-    try:
-        log(f"访问登录页: {LOGIN_URL}")
-        page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(1200)
+        browser = p.chromium.launch(**launch_kwargs)
+        context = browser.new_context(viewport={"width": 1366, "height": 900})
+        page = context.new_page()
 
-        log("尝试页面表单登录")
-        submitted = submit_login_form(page)
-        if submitted:
-            log("登录表单已提交")
-            page.wait_for_timeout(2000)
-            try:
-                page.wait_for_load_state("domcontentloaded", timeout=15000)
-                page.wait_for_load_state("networkidle", timeout=8000)
-            except PlaywrightTimeoutError:
-                result["debug_hints"].append("登录后页面存在持续请求，已跳过 networkidle 严格等待")
-        else:
-            log("表单未识别，尝试 API 登录")
-            token = try_login_api(context)
-            if token:
-                page.evaluate(
-                    """
-                    (t) => {
-                      localStorage.setItem('auth_token', t);
-                      sessionStorage.setItem('auth_token', t);
-                    }
-                    """,
-                    token,
-                )
-                page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
+        try:
+            log(f"访问登录页: {LOGIN_URL}")
+            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(1200)
+
+            log("尝试页面表单登录")
+            submitted = submit_login_form(page)
+            if submitted:
+                page.wait_for_timeout(2000)
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except PlaywrightTimeoutError:
+                    result["debug_hints"].append("登录后页面存在持续请求，已跳过 networkidle 严格等待")
             else:
-                result["debug_hints"].append("表单登录和 API 登录均失败（可能被风控拦截）")
+                token = try_login_api(context)
+                if token:
+                    page.evaluate("""(t)=>{localStorage.setItem('auth_token',t);sessionStorage.setItem('auth_token',t);} """, token)
+                    page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
+                else:
+                    result["debug_hints"].append("表单登录和 API 登录均失败（可能被风控拦截）")
 
-        page.wait_for_timeout(1800)
+            page.wait_for_timeout(1800)
 
-        signed_a = page.get_by_text("今日已签到")
-        signed_b = page.get_by_text("签到完成")
+            signed_a = page.get_by_text("今日已签到")
+            signed_b = page.get_by_text("签到完成")
 
-        sign_target = None
-        for _ in range(10):
-            if signed_a.count() > 0 or signed_b.count() > 0 or card_has_signed_text(page):
-                break
-            sign_target = find_sign_target(page)
-            if sign_target is not None:
-                break
-            page.wait_for_timeout(2000)
-
-        if signed_a.count() > 0 or signed_b.count() > 0 or card_has_signed_text(page):
-            result["status"] = "already_signed"
-            result["signed_today"] = True
-            log("已识别到今日已签到")
-        elif sign_target is not None:
-            log("检测到签到入口，执行点击")
-            sign_target.click()
-            page.wait_for_timeout(2500)
-
-            # best-effort for turnstile checkbox
-            for f in page.frames:
-                if re.search(r"cloudflare|turnstile", f.url, re.IGNORECASE):
-                    cb = f.locator('input[type="checkbox"], div[role="checkbox"], label').first
-                    if cb.count() > 0:
-                        try:
-                            cb.click(timeout=5000)
-                            log("已尝试点击验证码控件")
-                        except PlaywrightTimeoutError:
-                            pass
+            sign_target = None
+            for _ in range(10):
+                if signed_a.count() > 0 or signed_b.count() > 0:
                     break
+                sign_target = find_sign_target(page)
+                if sign_target is not None:
+                    break
+                page.wait_for_timeout(2000)
 
-            page.wait_for_timeout(3000)
             if signed_a.count() > 0 or signed_b.count() > 0:
-                result["status"] = "checked_in_now"
+                result["status"] = "already_signed"
                 result["signed_today"] = True
-                log("签到成功")
+                log("已识别到今日已签到")
+            elif sign_target is not None:
+                log("检测到签到入口，执行点击")
+                sign_target.click()
+                page.wait_for_timeout(2500)
+
+                for f in page.frames:
+                    if re.search(r"cloudflare|turnstile", f.url, re.IGNORECASE):
+                        cb = f.locator('input[type="checkbox"], div[role="checkbox"], label').first
+                        if cb.count() > 0:
+                            try:
+                                cb.click(timeout=5000)
+                            except PlaywrightTimeoutError:
+                                pass
+                        break
+
+                page.wait_for_timeout(3000)
+                if signed_a.count() > 0 or signed_b.count() > 0:
+                    result["status"] = "checked_in_now"
+                    result["signed_today"] = True
+                    log("签到成功")
+                else:
+                    result["status"] = "checkin_uncertain"
+                    result["note"] = "Clicked sign-in but no success text found"
             else:
-                result["status"] = "checkin_uncertain"
-                result["note"] = "Clicked sign-in but no success text found"
-                log("签到结果不确定")
-        else:
-            result["status"] = "sign_button_not_found"
-            result["note"] = "No sign-in control found"
-            if page.locator('input[type="password"]').count() > 0:
-                result["debug_hints"].append("当前页面疑似仍在登录页")
+                result["status"] = "sign_button_not_found"
+                result["note"] = "No sign-in control found"
+                if page.locator('input[type="password"]').count() > 0:
+                    result["debug_hints"].append("当前页面疑似仍在登录页")
 
-        result["balance"] = detect_balance_from_dom(page)
+            result["balance"] = detect_balance_from_dom(page)
+            return 0 if result["signed_today"] else 2
 
-        if result["signed_today"]:
-            save_and_exit(0)
-        else:
-            save_and_exit(2)
+        finally:
+            context.close()
+            browser.close()
 
+
+pool = parse_proxy_pool()
+last_error = None
+for i, proxy in enumerate(pool, start=1):
+    try:
+        log(f"尝试代理 {i}/{len(pool)}")
+        code = run_once(proxy)
+        save_and_exit(code)
     except Exception as e:
-        result["status"] = "failed"
-        result["note"] = str(e)
-        save_and_exit(1)
-    finally:
-        context.close()
-        browser.close()
+        last_error = e
+        result["debug_hints"].append(f"代理失败: {proxy}")
+        log(f"代理失败: {proxy} -> {e}")
+
+# final fallback: direct connection
+try:
+    log("所有代理失败，回退直连")
+    result["debug_hints"].append("所有代理失败，已回退直连")
+    code = run_once(None)
+    save_and_exit(code)
+except Exception as e:
+    result["status"] = "failed"
+    result["note"] = str(e if e else last_error)
+    save_and_exit(1)

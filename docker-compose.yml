@@ -1,9 +1,0 @@
-services:
-  hohai-checkin:
-    build: .
-    container_name: hohai-checkin
-    env_file:
-      - .env
-    restart: "no"
-    volumes:
-      - ./artifacts:/app/artifacts

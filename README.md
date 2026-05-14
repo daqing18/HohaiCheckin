@@ -1,57 +1,45 @@
-# HohaiCheckin (Docker)
+# HohaiCheckin (GitHub Actions + HTTP Proxy Pool)
 
-目标：
-1) 访问并登录 `https://tv.hohai.eu.org/login`
-2) 自动进入 `https://tv.hohai.eu.org/dashboard`
-3) 完成签到动作
-4) 读取账户余额信息
+## 已完成
+- 改为 GitHub Actions 运行
+- 使用 HTTP 代理池固定出口优先级（失败自动切换）
+- 所有代理失败时自动回退直连
 
----
+## 代理连通性测试结果（本次检测）
+输入代理：
+- 255.197.250.100:52576
+- 45.146.243.133:1080
+- 47.238.103.100:8888
+- 210.177.178.148:80
+- 103.253.43.144:80
+- 47.83.168.191:4000
+- 152.32.132.190:7890
+- 47.238.203.170:50000
 
-## 1. 配置环境变量
-```bash
-cp .env.example .env
+筛选出的 3 个可用代理池：
+1. `http://47.83.168.191:4000`（3/3 成功，平均约 3.5s）
+2. `http://45.146.243.133:1080`（3/3 成功，平均约 7.0s）
+3. `http://47.238.203.170:50000`（2/3 成功，约 12s，作为末位备用）
+
+## Secrets
+必须：
+- `HOHAI_UN`
+- `HOHAI_PW`
+
+可选：
+- `HOHAI_TGTK`
+- `HOHAI_TGID`
+- `HTTP_PROXY_POOL`（JSON 数组字符串，覆盖默认代理池）
+
+示例 `HTTP_PROXY_POOL`：
+```json
+["http://47.83.168.191:4000","http://45.146.243.133:1080","http://47.238.203.170:50000"]
 ```
-编辑 `.env`：
-```env
-HOHAI_UN=your_username
-HOHAI_PW=your_password
-HEADLESS=true
-HOHAI_TGTK=
-HOHAI_TGID=
-```
 
-## 2. Docker 运行（手动）
-```bash
-chmod +x run_docker.sh
-./run_docker.sh
-```
+## 运行
+- 自动：每天 08:08（Asia/Shanghai）
+- 手动：Actions -> Run workflow
 
-运行结果：
-- 控制台日志
+## 输出
 - `artifacts/result-*.json`
-
-## 3. 使用 systemd 定时启动（推荐）
-把仓库放在 `/opt/HohaiCheckin` 后执行：
-
-```bash
-sudo cp deploy/systemd/hohai-checkin-docker.service /etc/systemd/system/
-sudo cp deploy/systemd/hohai-checkin-docker.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now hohai-checkin-docker.timer
-```
-
-手动触发一次：
-```bash
-sudo systemctl start hohai-checkin-docker.service
-```
-
-查看日志：
-```bash
-sudo journalctl -u hohai-checkin-docker.service -n 200 --no-pager
-```
-
-## 4. 退出码
-- `0`：成功（`already_signed` / `checked_in_now`）
-- `2`：未完成签到（如 `sign_button_not_found` / `checkin_uncertain`）
-- `1`：异常失败
+- Telegram 通知（若配置）

@@ -1,26 +1,46 @@
-name: Hohai Check-in (Manual via self-hosted)
+name: Hohai Daily Check-in
 
 on:
+  schedule:
+    # 08:08 Asia/Shanghai
+    - cron: '8 0 * * *'
   workflow_dispatch:
 
 jobs:
   checkin:
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run check-in directly
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run check-in
         env:
           HOHAI_UN: ${{ secrets.HOHAI_UN }}
           HOHAI_PW: ${{ secrets.HOHAI_PW }}
           HOHAI_TGTK: ${{ secrets.HOHAI_TGTK }}
           HOHAI_TGID: ${{ secrets.HOHAI_TGID }}
           HEADLESS: 'true'
-        run: |
-          python3 --version
-          python3 -m pip install --break-system-packages -r requirements.txt
-          python3 -m playwright install chromium
-          python3 checkin.py
+          # Optional override. Keep JSON array string.
+          HTTP_PROXY_POOL: ${{ secrets.HTTP_PROXY_POOL }}
+        run: python checkin.py
+
+      - name: Upload JSON artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hohai-checkin-json
+          path: artifacts/*.json
+          if-no-files-found: ignore
