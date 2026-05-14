@@ -1,18 +1,11 @@
 # HohaiCheckin
 
-本仓库现提供两种模式：
-1. `checkin.py`（Python + Playwright）
-2. `worker.js`（Cloudflare Workers API 签到模式）
+Python + Playwright 的 Hohai 每日自动签到脚本（GitHub Actions）。
+目标登录地址固定：`https://tv.hohai.eu.org/login`。
 
-Workers 模式基于接口调用：
-- `POST /api/auth/login`
-- `GET /api/checkin/status`
-- `POST /api/checkin`
-
-## 你要求的变更
-- 已删除此前 Node.js 依赖（`node_modules/`, `package.json`, `package-lock.json`, `src/`）
-- 改为 Python 实现（`checkin.py`）
-- 已添加 GitHub Actions 工作流（`.github/workflows/daily-checkin.yml`）
+## 说明
+- 已移除 Cloudflare Workers 版本（`worker.js` / `wrangler.toml`）。
+- 主流程仅保留 Python 脚本 `checkin.py`。
 
 ## 本地运行（可选）
 ```bash
@@ -21,77 +14,36 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python -m playwright install chromium
 cp .env.example .env
-# 填写用户名密码
 python checkin.py
 ```
 
-## Cloudflare Workers 部署（新增）
-1. 安装并登录 Wrangler：
-```bash
-npm i -g wrangler
-wrangler login
-```
-2. 在项目目录发布：
-```bash
-wrangler deploy
-```
-3. 配置 Workers Secrets：
-```bash
-wrangler secret put HOHAI_UN
-wrangler secret put HOHAI_PW
-wrangler secret put HOHAI_TGTK
-wrangler secret put HOHAI_TGID
-```
-4. 手动触发测试：
-- 访问 `https://<你的worker域名>/run`
-
-> 定时任务在 `wrangler.toml` 中：`8 0 * * *`（UTC，即北京时间 08:08）
-
 ## GitHub Actions 配置
-在仓库里设置以下 Secrets：
+在仓库里设置 Secrets：
 - `HOHAI_UN`
 - `HOHAI_PW`
 - `SOCKS5_PROXY`（可选）
-  - 支持单个代理：`socks5://x.x.x.x:port`
-  - 支持 JSON 数组（同一个变量中多个代理）：
+  - 单代理：`socks5://x.x.x.x:port`
+  - 多代理 JSON 数组：
     - `[
       "socks5://1.1.1.1:1080",
       "socks5://2.2.2.2:1080"
       ]`
-  - 运行时会按顺序尝试代理，失败自动切换下一个，全部失败后回退直连
-  - ⚠️ 当前 Playwright/Chromium 在本流程下不支持 SOCKS5 用户名密码鉴权代理（会报 `does not support socks5 proxy authentication`）
-
-路径：`Settings -> Secrets and variables -> Actions -> New repository secret`
+  - 失败会自动切换下一个，全部失败后回退直连
+  - 注意：SOCKS5 用户名密码鉴权代理在当前 Playwright/Chromium 链路下不支持
+- `HOHAI_TGTK`（可选）
+- `HOHAI_TGID`（可选）
 
 ## 触发方式
 - 自动：每天 08:08（Asia/Shanghai）
 - 手动：Actions 页面点 `Run workflow`
 
-## 结果产物
-每次执行会输出到 `artifacts/`：
-- `result-*.json`（状态、余额解析、备注）
-
-并通过 `upload-artifact` 上传到本次 Actions 运行中（仅 JSON）。
-
-## Telegram 通知
-脚本支持执行后自动发 Telegram 消息。
-
-新增 Secrets：
-- `HOHAI_TGTK`
-- `HOHAI_TGID`
-
-若不配置 Telegram secrets，脚本会跳过通知，不影响签到流程。
+## 输出
+- `artifacts/result-*.json`
+- 同步 Telegram 通知（若配置）
 
 ## 状态说明
 - `already_signed`：当天已签到
 - `checked_in_now`：本次签到成功
-- `checkin_uncertain`：点击后未识别成功文案（常见于 Cloudflare 挑战未通过）
-- `sign_button_not_found`：未找到签到入口（页面结构可能变化）
+- `checkin_uncertain`：点击后未识别成功文案（常见于验证码未通过）
+- `sign_button_not_found`：未找到签到入口
 - `failed`：运行异常
-
-## 重要建议（务实）
-1. **Cloudflare 验证可能拦截云服务器（含 GitHub Actions IP）**。如果风控严格，自动化可能不稳定。
-2. 若你发现 Actions 成功率低，建议改为：
-   - 在你自己的常用网络环境运行（本机/家用服务器）
-   - 或使用持久化会话（后续可加 `storageState` 思路）降低挑战概率。
-3. 建议增加失败通知（Telegram/邮件），只在失败时提醒，减少打扰。

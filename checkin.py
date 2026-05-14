@@ -9,7 +9,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-
 load_dotenv()
 
 LOGIN_URL = "https://tv.hohai.eu.org/login"
@@ -46,11 +45,6 @@ def log_step(message: str):
 
 
 def parse_proxy_candidates(raw: str):
-    """
-    SOCKS5_PROXY supports:
-    1) single string: socks5://user:pass@ip:port
-    2) JSON array string: ["socks5://...", "socks5://..."]
-    """
     if not raw:
         return []
     v = raw.strip()
@@ -67,18 +61,11 @@ def parse_proxy_candidates(raw: str):
 
 
 def build_proxy_config(proxy: str):
-    """
-    Parse SOCKS5 proxy string and return Playwright proxy config.
-    Supports raw special chars in username/password.
-    Example: socks5://user@name:pa:ss/word@1.2.3.4:1080
-    """
     p = proxy.strip()
     if not p:
         return None
-
     if not p.startswith("socks5://"):
         return {"server": p}
-
     body = p[len("socks5://"):]
     if "@" not in body:
         return {"server": p}
@@ -125,11 +112,7 @@ def send_telegram_notification(payload: dict):
         f"⏰ 时间：{payload.get('time')}"
     )
 
-    data = {
-        "chat_id": TG_CHAT_ID,
-        "text": text,
-        "disable_web_page_preview": "true",
-    }
+    data = {"chat_id": TG_CHAT_ID, "text": text, "disable_web_page_preview": "true"}
     body = urllib.parse.urlencode(data).encode("utf-8")
     req = urllib.request.Request(
         url=f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
@@ -155,9 +138,68 @@ def save_result_and_exit(code: int = 0):
 def detect_balance(text: str):
     for line in text.splitlines():
         line = line.strip()
-        if re.search(r"余额|balance", line, re.IGNORECASE):
+        if re.search(r"余额|balance|wallet", line, re.IGNORECASE):
             return line
     return None
+
+
+def has_turnstile(page):
+    return any(re.search(r"cloudflare|turnstile", f.url, re.IGNORECASE) for f in page.frames)
+
+
+def fill_login_form(page):
+    user_selectors = [
+        'input[name="username"]',
+        'input[name="email"]',
+        'input[type="email"]',
+        'input[autocomplete="username"]',
+        'input[placeholder*="用户"]',
+        'input[placeholder*="账号"]',
+        'input[placeholder*="邮箱"]',
+        'input[id*="user" i]',
+        'input[id*="email" i]',
+        'form input[type="text"]',
+    ]
+    pass_selectors = [
+        'input[type="password"]',
+        'input[autocomplete="current-password"]',
+        'input[placeholder*="密码"]',
+        'input[id*="pass" i]',
+    ]
+
+    user_locator = page.locator(", ".join(user_selectors)).first
+    pass_locator = page.locator(", ".join(pass_selectors)).first
+
+    if user_locator.count() > 0 and pass_locator.count() > 0:
+        user_locator.fill(USERNAME)
+        pass_locator.fill(PASSWORD)
+        submit = page.locator(
+            'button:has-text("登录"), button:has-text("Sign in"), button:has-text("Login"), button[type="submit"], [role="button"]:has-text("登录")'
+        ).first
+        if submit.count() > 0:
+            submit.click()
+            return True
+
+    # JS fallback (for dynamic wrappers)
+    filled = page.evaluate(
+        """
+        ({u,p}) => {
+          const candidates = Array.from(document.querySelectorAll('input'));
+          const pass = candidates.find(i => i.type === 'password' || /pass|密码/i.test(i.name||'') || /pass|密码/i.test(i.id||'') || /密码/.test(i.placeholder||''));
+          const user = candidates.find(i => i !== pass && (
+            i.type === 'email' || i.autocomplete === 'username' || /user|email|账号|邮箱|用户/i.test(i.name||'') || /user|email/i.test(i.id||'') || /账号|邮箱|用户/.test(i.placeholder||'') || i.type === 'text'
+          ));
+          if (!user || !pass) return {ok:false, why:'no-input'};
+          user.focus(); user.value = u; user.dispatchEvent(new Event('input', {bubbles:true})); user.dispatchEvent(new Event('change', {bubbles:true}));
+          pass.focus(); pass.value = p; pass.dispatchEvent(new Event('input', {bubbles:true})); pass.dispatchEvent(new Event('change', {bubbles:true}));
+          const btn = Array.from(document.querySelectorAll('button,[role="button"],input[type="submit"]')).find(b => /登录|sign in|login/i.test((b.innerText||b.value||'').trim()));
+          if (btn) { btn.click(); return {ok:true}; }
+          return {ok:false, why:'no-submit'};
+        }
+        """,
+        {"u": USERNAME, "p": PASSWORD},
+    )
+    return bool(filled and filled.get("ok"))
 
 
 def run_once(use_proxy: bool, proxy_server: str | None = None):
@@ -170,10 +212,9 @@ def run_once(use_proxy: bool, proxy_server: str | None = None):
         if use_proxy and proxy_server:
             proxy_cfg = build_proxy_config(proxy_server)
             launch_kwargs["proxy"] = proxy_cfg
-            masked_server = proxy_cfg.get("server", "socks5://***")
-            log_step(f"已启用 SOCKS5 代理: {masked_server}")
+            log_step(f"已启用代理: {proxy_cfg.get('server')}")
         elif SOCKS5_PROXY:
-            log_step("使用直连模式（已跳过 SOCKS5 代理）")
+            log_step("使用直连模式（已跳过代理）")
 
         browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={"width": 1366, "height": 900})
@@ -182,31 +223,24 @@ def run_once(use_proxy: bool, proxy_server: str | None = None):
         try:
             log_step(f"正在访问 {LOGIN_URL}…")
             page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_timeout(1000)
+
+            if has_turnstile(page):
+                result["debug_hints"].append("登录页检测到 Cloudflare/Turnstile")
 
             log_step("正在执行登录")
-            user_inputs = page.locator('input[name="email"], input[name="username"], input[type="text"], input[placeholder*="用户"], input[placeholder*="账号"], input[placeholder*="邮箱"], input[id*="user" i], input[id*="email" i]')
-            pass_inputs = page.locator('input[type="password"], input[placeholder*="密码"], input[id*="pass" i]')
-
-            if user_inputs.count() > 0 and pass_inputs.count() > 0:
-                user_input = user_inputs.first
-                pass_input = pass_inputs.first
-                user_input.fill(USERNAME)
-                pass_input.fill(PASSWORD)
-                submit = page.locator('button:has-text("登录"), button:has-text("Sign in"), button:has-text("Login"), button[type="submit"], [role="button"]:has-text("登录")').first
-                submit.click()
+            submitted = fill_login_form(page)
+            if submitted:
+                log_step("登录表单已提交")
                 page.wait_for_timeout(2000)
                 page.wait_for_load_state("networkidle")
-                log_step("登录流程已提交，等待页面跳转")
             else:
-                result["debug_hints"].append("登录页未识别到用户名/密码输入框，可能已处于登录态")
-                log_step("未识别到登录输入框，按已登录态继续")
+                result["debug_hints"].append("未识别到可提交的登录表单，可能已登录或被验证码拦截")
+                log_step("未识别到可提交的登录表单，按已登录态继续")
 
-            page.wait_for_load_state("networkidle")
-            if page.locator('input[type="password"]').count() > 0:
-                log_step("登录失败或仍在登录页")
-            else:
-                log_step("登录成功（已离开密码输入页）")
+            page.wait_for_timeout(1500)
 
+            # signed/target detection with polling for card flip
             signed_text_a = page.get_by_text("今日已签到")
             signed_text_b = page.get_by_text("签到完成")
 
@@ -224,14 +258,13 @@ def run_once(use_proxy: bool, proxy_server: str | None = None):
                 return None
 
             sign_target = None
-            for _ in range(8):
-                already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
-                if already_signed_now:
+            for _ in range(10):
+                if signed_text_a.count() > 0 or signed_text_b.count() > 0:
                     break
                 sign_target = find_sign_target()
                 if sign_target is not None:
                     break
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(2000)
 
             already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
 
@@ -242,51 +275,47 @@ def run_once(use_proxy: bool, proxy_server: str | None = None):
             elif sign_target is not None:
                 log_step("检测到签到入口，开始点击签到")
                 sign_target.click()
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(1800)
 
-                cf_clicked = False
+                # best-effort click turnstile checkbox
                 for frame in page.frames:
                     if re.search(r"cloudflare|turnstile", frame.url, re.IGNORECASE):
                         checkbox = frame.locator('input[type="checkbox"], div[role="checkbox"], label').first
                         if checkbox.count() > 0:
                             try:
                                 checkbox.click(timeout=5000)
-                                cf_clicked = True
-                                break
+                                log_step("已尝试点击验证码控件")
                             except PlaywrightTimeoutError:
                                 pass
+                        break
 
                 page.wait_for_timeout(3000)
-
                 already_signed_after = signed_text_a.count() > 0 or signed_text_b.count() > 0
                 if already_signed_after:
                     log_step("签到成功")
                     result["status"] = "checked_in_now"
                     result["signed_today"] = True
-                    if cf_clicked:
-                        result["note"] = "Turnstile checkbox clicked (best effort)."
                 else:
-                    log_step("签到结果不确定（未检测到成功文案）")
+                    log_step("签到结果不确定")
                     result["status"] = "checkin_uncertain"
-                    result["note"] = "Sign clicked, but success text not found. Likely blocked by Cloudflare challenge."
+                    result["note"] = "Sign clicked, but success text not found. Likely blocked by challenge."
             else:
                 log_step("未找到签到入口")
                 result["status"] = "sign_button_not_found"
-                result["note"] = "Sign button/card not found. UI may have changed."
+                result["note"] = "Sign button/card not found."
                 if page.locator('input[type="password"]').count() > 0:
                     result["debug_hints"].append("当前页面疑似仍在登录页")
-                if any(re.search(r"cloudflare|turnstile", f.url, re.IGNORECASE) for f in page.frames):
+                if has_turnstile(page):
                     result["debug_hints"].append("检测到 Cloudflare/Turnstile frame")
 
-            page_text = page.locator("body").inner_text()
-            result["balance"] = detect_balance(page_text)
+            body_text = page.locator("body").inner_text()
+            result["balance"] = detect_balance(body_text)
 
             if result["signed_today"]:
                 log_step("任务结束：成功")
                 return 0
-            else:
-                log_step("任务结束：失败")
-                return 2
+            log_step("任务结束：失败")
+            return 2
 
         finally:
             context.close()
@@ -299,8 +328,8 @@ if proxy_candidates:
     for i, proxy in enumerate(proxy_candidates, start=1):
         try:
             log_step(f"尝试代理 {i}/{len(proxy_candidates)}")
-            exit_code = run_once(use_proxy=True, proxy_server=proxy)
-            save_result_and_exit(exit_code)
+            code = run_once(use_proxy=True, proxy_server=proxy)
+            save_result_and_exit(code)
         except Exception as e:
             msg = str(e)
             if "ERR_SOCKS_CONNECTION_FAILED" in msg:
@@ -308,8 +337,8 @@ if proxy_candidates:
                 log_step(f"代理 {i} 连接失败，尝试下一个")
                 continue
             if "does not support socks5 proxy authentication" in msg.lower():
-                result["debug_hints"].append(f"代理 {i} 使用了 SOCKS5 账号密码鉴权，当前浏览器不支持")
-                log_step(f"代理 {i} 为 SOCKS5 鉴权代理，当前浏览器不支持，尝试下一个")
+                result["debug_hints"].append(f"代理 {i} 为 SOCKS5 鉴权代理，当前浏览器不支持")
+                log_step(f"代理 {i} 鉴权不受支持，尝试下一个")
                 continue
             result["status"] = "failed"
             result["note"] = msg
@@ -317,21 +346,13 @@ if proxy_candidates:
             save_result_and_exit(1)
 
     log_step("所有代理均失败，自动回退到直连重试")
-    result["debug_hints"].append("所有 SOCKS5 代理连接失败，已回退直连")
-    try:
-        exit_code = run_once(use_proxy=False)
-        save_result_and_exit(exit_code)
-    except Exception as e2:
-        result["status"] = "failed"
-        result["note"] = str(e2)
-        log_step(f"直连重试仍失败：{e2}")
-        save_result_and_exit(1)
-else:
-    try:
-        exit_code = run_once(use_proxy=False)
-        save_result_and_exit(exit_code)
-    except Exception as e:
-        result["status"] = "failed"
-        result["note"] = str(e)
-        log_step(f"任务异常：{e}")
-        save_result_and_exit(1)
+    result["debug_hints"].append("所有代理失败，已回退直连")
+
+try:
+    code = run_once(use_proxy=False)
+    save_result_and_exit(code)
+except Exception as e:
+    result["status"] = "failed"
+    result["note"] = str(e)
+    log_step(f"任务异常：{e}")
+    save_result_and_exit(1)
