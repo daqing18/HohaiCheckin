@@ -19,11 +19,13 @@ jobs:
         run: |
           python3 --version
 
-      - name: Install dependencies
+      - name: Install dependencies (venv)
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r requirements.txt
-          python3 -m playwright install chromium
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m playwright install chromium
 
       - name: Run check-in
         env:
@@ -33,7 +35,9 @@ jobs:
           HOHAI_TGTK: ${{ secrets.HOHAI_TGTK }}
           HOHAI_TGID: ${{ secrets.HOHAI_TGID }}
           HEADLESS: 'true'
-        run: python3 checkin.py
+        run: |
+          . .venv/bin/activate
+          python checkin.py
 
       - name: Upload JSON artifacts
         if: always()
