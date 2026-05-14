@@ -307,6 +307,10 @@ if proxy_candidates:
                 result["debug_hints"].append(f"代理 {i} 连接失败")
                 log_step(f"代理 {i} 连接失败，尝试下一个")
                 continue
+            if "does not support socks5 proxy authentication" in msg.lower():
+                result["debug_hints"].append(f"代理 {i} 使用了 SOCKS5 账号密码鉴权，当前浏览器不支持")
+                log_step(f"代理 {i} 为 SOCKS5 鉴权代理，当前浏览器不支持，尝试下一个")
+                continue
             result["status"] = "failed"
             result["note"] = msg
             log_step(f"任务异常：{e}")
