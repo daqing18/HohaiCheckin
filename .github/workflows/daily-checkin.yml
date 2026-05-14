@@ -119,5 +119,7 @@ jobs:
           name: hohai-checkin
           path: |
             artifacts/*.json
+            artifacts/*.png
+            artifacts/*.html
             singbox/singbox.log
           if-no-files-found: ignore

@@ -202,6 +202,16 @@ def find_sign_target(page):
     return None
 
 
+def is_signed_card(page) -> bool:
+    if page.locator("[data-checkin-card='default']").count() > 0:
+        if page.locator("[class*='statusNotChecked']").count() == 0:
+            return True
+    for txt in ("今日已签到", "签到完成", "签到成功", "已签到", "明日再来", "已经签过"):
+        if page.get_by_text(txt).count() > 0:
+            return True
+    return False
+
+
 def run_once(proxy: str | None):
     with sync_playwright() as p:
         launch_kwargs = {"headless": HEADLESS}
@@ -213,6 +223,34 @@ def run_once(proxy: str | None):
         browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={"width": 1366, "height": 900})
         page = context.new_page()
+
+        network_log: list[dict] = []
+        static_re = re.compile(r"\.(?:js|css|woff2?|ttf|png|jpe?g|gif|svg|ico|map)(?:\?|$)", re.IGNORECASE)
+
+        def on_requestfinished(req):
+            try:
+                if "hohai.eu.org" not in req.url or static_re.search(req.url):
+                    return
+                resp = req.response()
+                if resp is None:
+                    return
+                try:
+                    body = resp.text()
+                    if len(body) > 2000:
+                        body = body[:2000] + "…[truncated]"
+                except Exception:
+                    body = "<binary or unreadable>"
+                network_log.append({
+                    "ts": datetime.now(CN_TZ).strftime("%H:%M:%S.%f")[:-3],
+                    "method": req.method,
+                    "url": req.url,
+                    "status": resp.status,
+                    "body_excerpt": body,
+                })
+            except Exception:
+                pass
+
+        context.on("requestfinished", on_requestfinished)
 
         try:
             log(f"访问登录页: {LOGIN_URL}")
@@ -243,24 +281,31 @@ def run_once(proxy: str | None):
 
             page.wait_for_timeout(1800)
 
-            signed_a = page.get_by_text("今日已签到")
-            signed_b = page.get_by_text("签到完成")
-
             sign_target = None
             for _ in range(10):
-                if signed_a.count() > 0 or signed_b.count() > 0:
+                if is_signed_card(page):
                     break
                 sign_target = find_sign_target(page)
                 if sign_target is not None:
                     break
                 page.wait_for_timeout(2000)
 
-            if signed_a.count() > 0 or signed_b.count() > 0:
+            if is_signed_card(page):
                 result["status"] = "今日已签到"
                 result["signed_today"] = True
                 log("已识别到今日已签到")
             elif sign_target is not None:
-                log("检测到签到入口，执行点击")
+                log("检测到签到入口,执行点击")
+
+                try:
+                    page.screenshot(path=str(ARTIFACTS / f"before-click-{TS}.png"), full_page=True)
+                    (ARTIFACTS / f"before-click-{TS}.html").write_text(page.content(), encoding="utf-8")
+                except Exception as e:
+                    result["debug_hints"].append(f"before-click snapshot failed: {e}")
+
+                network_log.clear()
+                click_at = datetime.now(CN_TZ).isoformat()
+
                 sign_target.click()
                 page.wait_for_timeout(2500)
 
@@ -275,13 +320,28 @@ def run_once(proxy: str | None):
                         break
 
                 page.wait_for_timeout(3000)
-                if signed_a.count() > 0 or signed_b.count() > 0:
+
+                try:
+                    page.screenshot(path=str(ARTIFACTS / f"after-click-{TS}.png"), full_page=True)
+                    (ARTIFACTS / f"after-click-{TS}.html").write_text(page.content(), encoding="utf-8")
+                except Exception as e:
+                    result["debug_hints"].append(f"after-click snapshot failed: {e}")
+
+                try:
+                    (ARTIFACTS / f"network-{TS}.json").write_text(
+                        json.dumps({"click_at": click_at, "events": network_log}, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception as e:
+                    result["debug_hints"].append(f"network log write failed: {e}")
+
+                if is_signed_card(page):
                     result["status"] = "本次签到成功"
                     result["signed_today"] = True
                     log("签到成功")
                 else:
                     result["status"] = "签到结果不确定"
-                    result["note"] = "Clicked sign-in but no success text found"
+                    result["note"] = "Clicked sign-in but card state did not change"
             else:
                 result["status"] = "未找到签到入口"
                 result["note"] = "No sign-in control found"
