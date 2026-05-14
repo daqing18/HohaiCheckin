@@ -20,6 +20,7 @@ PASSWORD = os.getenv("HOHAI_PW")
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 TG_BOT_TOKEN = os.getenv("HOHAI_TGTK")
 TG_CHAT_ID = os.getenv("HOHAI_TGID")
+STRICT_PROXY = os.getenv("STRICT_PROXY", "true").lower() == "true"
 
 # Top-3 selected from connectivity benchmark (this environment):
 # 1) 47.83.168.191:4000  (3/3 success, fastest)
@@ -226,12 +227,15 @@ def run_once(proxy: str | None):
                 except PlaywrightTimeoutError:
                     result["debug_hints"].append("登录后页面存在持续请求，已跳过 networkidle 严格等待")
             else:
-                token = try_login_api(context)
-                if token:
-                    page.evaluate("""(t)=>{localStorage.setItem('auth_token',t);sessionStorage.setItem('auth_token',t);} """, token)
-                    page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
+                if STRICT_PROXY:
+                    result["debug_hints"].append("严格代理模式：跳过 API 登录兜底，仅允许页面表单登录")
                 else:
-                    result["debug_hints"].append("表单登录和 API 登录均失败（可能被风控拦截）")
+                    token = try_login_api(context)
+                    if token:
+                        page.evaluate("""(t)=>{localStorage.setItem('auth_token',t);sessionStorage.setItem('auth_token',t);} """, token)
+                        page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=60000)
+                    else:
+                        result["debug_hints"].append("表单登录和 API 登录均失败（可能被风控拦截）")
 
             page.wait_for_timeout(1800)
 
@@ -300,7 +304,13 @@ for i, proxy in enumerate(pool, start=1):
         result["debug_hints"].append(f"代理失败: {proxy}")
         log(f"代理失败: {proxy} -> {e}")
 
-# final fallback: direct connection
+if STRICT_PROXY:
+    result["status"] = "failed"
+    result["note"] = "All proxies failed in STRICT_PROXY mode"
+    result["debug_hints"].append("严格代理模式已启用：禁止直连回退")
+    save_and_exit(1)
+
+# non-strict fallback: direct connection
 try:
     log("所有代理失败，回退直连")
     result["debug_hints"].append("所有代理失败，已回退直连")

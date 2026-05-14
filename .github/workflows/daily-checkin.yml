@@ -36,6 +36,7 @@ jobs:
           HOHAI_TGTK: ${{ secrets.HOHAI_TGTK }}
           HOHAI_TGID: ${{ secrets.HOHAI_TGID }}
           HEADLESS: 'true'
+          STRICT_PROXY: 'true'
           # Optional override. Keep JSON array string.
           HTTP_PROXY_POOL: ${{ secrets.HTTP_PROXY_POOL }}
         run: python checkin.py
