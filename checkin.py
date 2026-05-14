@@ -40,6 +40,11 @@ result = {
 }
 
 
+def log_step(message: str):
+    now = datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M:%S%z")
+    print(f"[{now}] {message}")
+
+
 def send_telegram_notification(payload: dict):
     if not TG_BOT_TOKEN or not TG_CHAT_ID:
         return
@@ -104,6 +109,7 @@ with sync_playwright() as p:
         "headless": HEADLESS,
         "args": ["--disable-blink-features=AutomationControlled"],
     }
+    log_step("启动浏览器")
     if SOCKS5_PROXY:
         launch_kwargs["proxy"] = {"server": SOCKS5_PROXY}
 
@@ -113,9 +119,11 @@ with sync_playwright() as p:
 
     try:
         # 1) go login page first
+        log_step(f"正在访问 {LOGIN_URL}…")
         page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
 
         # 2) login
+        log_step("正在执行登录")
         user_inputs = page.locator('input[name="email"], input[name="username"], input[type="text"], input[placeholder*="用户"], input[placeholder*="账号"], input[placeholder*="邮箱"], input[id*="user" i], input[id*="email" i]')
         pass_inputs = page.locator('input[type="password"], input[placeholder*="密码"], input[id*="pass" i]')
 
@@ -128,11 +136,17 @@ with sync_playwright() as p:
             submit.click()
             page.wait_for_timeout(2000)
             page.wait_for_load_state("networkidle")
+            log_step("登录流程已提交，等待页面跳转")
         else:
             result["debug_hints"].append("登录页未识别到用户名/密码输入框，可能已处于登录态")
+            log_step("未识别到登录输入框，按已登录态继续")
 
         # 3) wait redirect after login (site should auto-jump to dashboard)
         page.wait_for_load_state("networkidle")
+        if page.locator('input[type="password"]').count() > 0:
+            log_step("登录失败或仍在登录页")
+        else:
+            log_step("登录成功（已离开密码输入页）")
 
         signed_text_a = page.get_by_text("今日已签到")
         signed_text_b = page.get_by_text("签到完成")
@@ -163,9 +177,11 @@ with sync_playwright() as p:
         already_signed_now = signed_text_a.count() > 0 or signed_text_b.count() > 0
 
         if already_signed_now:
+            log_step("检测到今日已签到")
             result["status"] = "already_signed"
             result["signed_today"] = True
         elif sign_target is not None:
+            log_step("检测到签到入口，开始点击签到")
             sign_target.click()
             page.wait_for_timeout(1500)
 
@@ -187,14 +203,17 @@ with sync_playwright() as p:
 
             already_signed_after = signed_text_a.count() > 0 or signed_text_b.count() > 0
             if already_signed_after:
+                log_step("签到成功")
                 result["status"] = "checked_in_now"
                 result["signed_today"] = True
                 if cf_clicked:
                     result["note"] = "Turnstile checkbox clicked (best effort)."
             else:
+                log_step("签到结果不确定（未检测到成功文案）")
                 result["status"] = "checkin_uncertain"
                 result["note"] = "Sign clicked, but success text not found. Likely blocked by Cloudflare challenge."
         else:
+            log_step("未找到签到入口")
             result["status"] = "sign_button_not_found"
             result["note"] = "Sign button/card not found. UI may have changed."
             if page.locator('input[type="password"]').count() > 0:
@@ -206,13 +225,16 @@ with sync_playwright() as p:
         result["balance"] = detect_balance(page_text)
 
         if result["signed_today"]:
+            log_step("任务结束：成功")
             save_result_and_exit(0)
         else:
+            log_step("任务结束：失败")
             save_result_and_exit(2)
 
     except Exception as e:
         result["status"] = "failed"
         result["note"] = str(e)
+        log_step(f"任务异常：{e}")
         save_result_and_exit(1)
     finally:
         context.close()
