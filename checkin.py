@@ -233,7 +233,12 @@ def run_once(use_proxy: bool, proxy_server: str | None = None):
             if submitted:
                 log_step("登录表单已提交")
                 page.wait_for_timeout(2000)
-                page.wait_for_load_state("networkidle")
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except PlaywrightTimeoutError:
+                    result["debug_hints"].append("登录后页面持续请求，已跳过 networkidle 严格等待")
+                    log_step("登录后等待超时，继续后续检测")
             else:
                 result["debug_hints"].append("未识别到可提交的登录表单，可能已登录或被验证码拦截")
                 log_step("未识别到可提交的登录表单，按已登录态继续")
