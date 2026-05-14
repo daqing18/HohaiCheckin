@@ -177,7 +177,29 @@ def submit_login_form(page):
     return False
 
 
+def card_has_signed_text(page):
+    card = page.locator('[data-checkin-card="default"]').first
+    if card.count() == 0:
+        return False
+    txt = card.inner_text()
+    return ("今日已签到" in txt) or ("签到完成" in txt)
+
+
 def find_sign_target(page):
+    card = page.locator('[data-checkin-card="default"]').first
+    if card.count() > 0:
+        card_candidates = [
+            card.locator('button:has-text("签到")').first,
+            card.locator('[role="button"]:has-text("签到")').first,
+            card.locator('div:has-text("签到")').first,
+            card.locator('span:has-text("签到")').first,
+        ]
+        for c in card_candidates:
+            if c.count() > 0:
+                return c
+        # Fallback: click card container itself when card exists but no explicit button.
+        return card
+
     candidates = [
         page.locator('button:has-text("签到")').first,
         page.locator('[role="button"]:has-text("签到")').first,
@@ -235,14 +257,14 @@ with sync_playwright() as p:
 
         sign_target = None
         for _ in range(10):
-            if signed_a.count() > 0 or signed_b.count() > 0:
+            if signed_a.count() > 0 or signed_b.count() > 0 or card_has_signed_text(page):
                 break
             sign_target = find_sign_target(page)
             if sign_target is not None:
                 break
             page.wait_for_timeout(2000)
 
-        if signed_a.count() > 0 or signed_b.count() > 0:
+        if signed_a.count() > 0 or signed_b.count() > 0 or card_has_signed_text(page):
             result["status"] = "already_signed"
             result["signed_today"] = True
             log("已识别到今日已签到")
