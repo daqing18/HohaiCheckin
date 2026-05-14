@@ -66,34 +66,39 @@ def parse_proxy_candidates(raw: str):
     return [v]
 
 
-def normalize_socks5_proxy(proxy: str) -> str:
+def build_proxy_config(proxy: str):
     """
-    Allow raw credentials containing @ : / and normalize to a valid proxy URL.
-    Example input: socks5://user@name:pa:ss/word@1.2.3.4:1080
+    Parse SOCKS5 proxy string and return Playwright proxy config.
+    Supports raw special chars in username/password.
+    Example: socks5://user@name:pa:ss/word@1.2.3.4:1080
     """
     p = proxy.strip()
     if not p:
-        return p
+        return None
 
     if not p.startswith("socks5://"):
-        return p
+        return {"server": p}
 
     body = p[len("socks5://"):]
     if "@" not in body:
-        return p
+        return {"server": p}
 
     creds, _, hostport = body.rpartition("@")
     if not hostport:
-        return p
+        return {"server": p}
 
     if ":" not in creds:
-        encoded_user = urllib.parse.quote(urllib.parse.unquote(creds), safe="")
-        return f"socks5://{encoded_user}@{hostport}"
+        return {
+            "server": f"socks5://{hostport}",
+            "username": urllib.parse.unquote(creds),
+        }
 
     user, password = creds.split(":", 1)
-    encoded_user = urllib.parse.quote(urllib.parse.unquote(user), safe="")
-    encoded_pw = urllib.parse.quote(urllib.parse.unquote(password), safe="")
-    return f"socks5://{encoded_user}:{encoded_pw}@{hostport}"
+    return {
+        "server": f"socks5://{hostport}",
+        "username": urllib.parse.unquote(user),
+        "password": urllib.parse.unquote(password),
+    }
 
 
 def send_telegram_notification(payload: dict):
@@ -163,9 +168,10 @@ def run_once(use_proxy: bool, proxy_server: str | None = None):
         }
         log_step("启动浏览器")
         if use_proxy and proxy_server:
-            normalized_proxy = normalize_socks5_proxy(proxy_server)
-            launch_kwargs["proxy"] = {"server": normalized_proxy}
-            log_step(f"已启用 SOCKS5 代理: {normalized_proxy}")
+            proxy_cfg = build_proxy_config(proxy_server)
+            launch_kwargs["proxy"] = proxy_cfg
+            masked_server = proxy_cfg.get("server", "socks5://***")
+            log_step(f"已启用 SOCKS5 代理: {masked_server}")
         elif SOCKS5_PROXY:
             log_step("使用直连模式（已跳过 SOCKS5 代理）")
 
