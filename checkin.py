@@ -45,7 +45,7 @@ result = {
     "proxy_used": None,
 }
 
-# ==================== 从参考代码引入：Turnstile 强行注入脚本 ====================
+# ==================== Turnstile 强行注入与检测脚本 ====================
 _EXPAND_JS = """
 () => {
     var ts = document.querySelector('input[name="cf-turnstile-response"]');
@@ -76,7 +76,7 @@ _SOLVED_JS = """
     return !!(i && i.value && i.value.length > 20);
 }
 """
-# ==============================================================================
+# ======================================================================
 
 
 def log(msg: str):
@@ -241,32 +241,26 @@ def is_signed_card(page) -> bool:
 
 
 def handle_turnstile_with_retry(page) -> bool:
-    """借鉴参考代码：多轮检测 + 强行展开 DOM + 拟人轨迹点击"""
     log("🔍 开始处理 Cloudflare Turnstile 验证...")
     page.wait_for_timeout(2000)
 
-    # 1. 检查是否已经静默通过
     if page.evaluate(_SOLVED_JS):
         log("✅ Turnstile 已自动静默通过")
         return True
 
-    # 2. 最多尝试 5 轮闭环操作
     for attempt in range(5):
         log(f"🔄 正在进行第 {attempt + 1} 轮 Turnstile 突破尝试...")
         
-        # 强行注入样式，解除父级 overflow: hidden 并放大 iframe
         try:
             page.evaluate(_EXPAND_JS)
         except Exception:
             pass
         page.wait_for_timeout(800)
 
-        # 再次检查是否通过
         if page.evaluate(_SOLVED_JS):
             log(f"✅ Turnstile 在第 {attempt + 1} 轮通过！")
             return True
 
-        # 寻找已展开的 Turnstile 模块盒子
         widget_box = page.evaluate("""
             () => {
               const el = document.querySelector('.cloudflare-turnstile-container, .turnstile-widget, iframe[src*="challenges.cloudflare.com"]');
@@ -277,17 +271,15 @@ def handle_turnstile_with_retry(page) -> bool:
         """)
 
         if widget_box and widget_box.get("w", 0) > 30:
-            # 计算点击坐标（轻微偏离中心，不点绝对死角）
             x = widget_box["x"] + widget_box["w"] * 0.2
             y = widget_box["y"] + widget_box["h"] * 0.5
             
             log(f"🖱️ 锁定验证码区域，执行拟人滑动点击: ({x:.0f}, {y:.0f})")
             try:
-                # 拟人滑动：从当前鼠标位置分 10 步滑过去
                 page.mouse.move(x - 50, y - 50)
                 page.wait_for_timeout(200)
                 page.mouse.move(x, y, steps=10)
-                page.wait_for_timeout(400) # 悬停让 JS 捕获 Hover 状态
+                page.wait_for_timeout(400)
                 page.mouse.down()
                 page.wait_for_timeout(100)
                 page.mouse.up()
@@ -296,7 +288,6 @@ def handle_turnstile_with_retry(page) -> bool:
         else:
             log("⚠️ 未能获取到验证码模块的有效点击坐标")
 
-        # 轮询等待验证结果（等 5 秒，每秒查一次）
         for _ in range(5):
             page.wait_for_timeout(1000)
             if page.evaluate(_SOLVED_JS):
@@ -400,16 +391,13 @@ def run_once(proxy: str | None):
                 network_log.clear()
                 click_at = datetime.now(CN_TZ).isoformat()
 
-                # 点击签到按钮
                 sign_target.click()
 
-                # ==================== 核心升级：调用强大的 Turnstile 处理逻辑 ====================
                 turnstile_solved = handle_turnstile_with_retry(page)
                 if turnstile_solved:
                     result["debug_hints"].append("Turnstile token 已成功生成")
                 else:
                     result["debug_hints"].append("Turnstile token 未能生成(超时或被拦截)")
-                # =================================================================================
 
                 page.wait_for_timeout(5000)
 
