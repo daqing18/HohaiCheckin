@@ -21,7 +21,6 @@ HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 TG_BOT_TOKEN = os.getenv("HOHAI_TGTK")
 TG_CHAT_ID = os.getenv("HOHAI_TGID")
 STRICT_PROXY = os.getenv("STRICT_PROXY", "true").lower() == "true"
-# Single upstream — sing-box (or any local proxy chain) handles failover/auth/urltest.
 HTTP_PROXY_URL = os.getenv("HTTP_PROXY_URL", "").strip() or None
 
 if not USERNAME or not PASSWORD:
@@ -45,6 +44,39 @@ result = {
     "debug_hints": [],
     "proxy_used": None,
 }
+
+# ==================== 从参考代码引入：Turnstile 强行注入脚本 ====================
+_EXPAND_JS = """
+() => {
+    var ts = document.querySelector('input[name="cf-turnstile-response"]');
+    if (!ts) return 'no-turnstile';
+    var el = ts;
+    for (var i = 0; i < 20; i++) {
+        el = el.parentElement;
+        if (!el) break;
+        var s = window.getComputedStyle(el);
+        if (s.overflow === 'hidden' || s.overflowX === 'hidden' || s.overflowY === 'hidden')
+            el.style.overflow = 'visible';
+        el.style.minWidth = 'max-content';
+    }
+    document.querySelectorAll('iframe').forEach(function(f){
+        if (f.src && f.src.includes('challenges.cloudflare.com')) {
+            f.style.width = '300px'; f.style.height = '65px';
+            f.style.minWidth = '300px';
+            f.style.visibility = 'visible'; f.style.opacity = '1';
+        }
+    });
+    return 'done';
+}
+"""
+
+_SOLVED_JS = """
+() => {
+    var i = document.querySelector('input[name="cf-turnstile-response"]');
+    return !!(i && i.value && i.value.length > 20);
+}
+"""
+# ==============================================================================
 
 
 def log(msg: str):
@@ -95,7 +127,6 @@ def detect_balance_from_dom(page):
           for (const label of labels) {
             const card = label.closest('div');
             if (!card) continue;
-
             const rollers = [...card.querySelectorAll('span.transition-transform')];
             if (rollers.length > 0) {
               const digits = rollers.map(r => {
@@ -109,12 +140,10 @@ def detect_balance_from_dom(page):
               if (digits.length >= 3 && hasDot) return `${digits[0]}.${digits.slice(1)} ¥`;
               if (digits.length > 0) return `${digits} ¥`;
             }
-
             const txt = (card.innerText || '').replace(/\s+/g, ' ').trim();
             const m2 = txt.match(/([0-9]+(?:\.[0-9]+)?)/);
             if (m2) return `${m2[1]} ¥`;
           }
-
           const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
           const m3 = body.match(/余额[^0-9]{0,12}([0-9]+(?:\.[0-9]+)?)/);
           if (m3) return `${m3[1]} ¥`;
@@ -159,7 +188,6 @@ def try_login_api_via_page(page):
 
 
 def submit_login_form(page):
-    # Wait for dynamic SPA form rendering
     try:
         page.wait_for_selector('input[name="password"],input[type="password"],input[autocomplete="current-password"]', timeout=15000)
     except PlaywrightTimeoutError:
@@ -209,6 +237,73 @@ def is_signed_card(page) -> bool:
     for txt in ("今日已签到", "签到完成", "签到成功", "已签到", "明日再来", "已经签过"):
         if page.get_by_text(txt).count() > 0:
             return True
+    return False
+
+
+def handle_turnstile_with_retry(page) -> bool:
+    """借鉴参考代码：多轮检测 + 强行展开 DOM + 拟人轨迹点击"""
+    log("🔍 开始处理 Cloudflare Turnstile 验证...")
+    page.wait_for_timeout(2000)
+
+    # 1. 检查是否已经静默通过
+    if page.evaluate(_SOLVED_JS):
+        log("✅ Turnstile 已自动静默通过")
+        return True
+
+    # 2. 最多尝试 5 轮闭环操作
+    for attempt in range(5):
+        log(f"🔄 正在进行第 {attempt + 1} 轮 Turnstile 突破尝试...")
+        
+        # 强行注入样式，解除父级 overflow: hidden 并放大 iframe
+        try:
+            page.evaluate(_EXPAND_JS)
+        except Exception:
+            pass
+        page.wait_for_timeout(800)
+
+        # 再次检查是否通过
+        if page.evaluate(_SOLVED_JS):
+            log(f"✅ Turnstile 在第 {attempt + 1} 轮通过！")
+            return True
+
+        # 寻找已展开的 Turnstile 模块盒子
+        widget_box = page.evaluate("""
+            () => {
+              const el = document.querySelector('.cloudflare-turnstile-container, .turnstile-widget, iframe[src*="challenges.cloudflare.com"]');
+              if (!el) return null;
+              const r = el.getBoundingClientRect();
+              return { x: r.x, y: r.y, w: r.width, h: r.height };
+            }
+        """)
+
+        if widget_box and widget_box.get("w", 0) > 30:
+            # 计算点击坐标（轻微偏离中心，不点绝对死角）
+            x = widget_box["x"] + widget_box["w"] * 0.2
+            y = widget_box["y"] + widget_box["h"] * 0.5
+            
+            log(f"🖱️ 锁定验证码区域，执行拟人滑动点击: ({x:.0f}, {y:.0f})")
+            try:
+                # 拟人滑动：从当前鼠标位置分 10 步滑过去
+                page.mouse.move(x - 50, y - 50)
+                page.wait_for_timeout(200)
+                page.mouse.move(x, y, steps=10)
+                page.wait_for_timeout(400) # 悬停让 JS 捕获 Hover 状态
+                page.mouse.down()
+                page.wait_for_timeout(100)
+                page.mouse.up()
+            except Exception as e:
+                log(f"点击异常: {e}")
+        else:
+            log("⚠️ 未能获取到验证码模块的有效点击坐标")
+
+        # 轮询等待验证结果（等 5 秒，每秒查一次）
+        for _ in range(5):
+            page.wait_for_timeout(1000)
+            if page.evaluate(_SOLVED_JS):
+                log(f"✅ Turnstile 验证通过！(第 {attempt + 1} 轮)")
+                return True
+
+    log("❌ 5 轮 Turnstile 尝试均未生成有效 Token")
     return False
 
 
@@ -267,7 +362,6 @@ def run_once(proxy: str | None):
                 except PlaywrightTimeoutError:
                     result["debug_hints"].append("登录后页面存在持续请求，已跳过 networkidle 严格等待")
             else:
-                # Use in-page fetch so network path stays same as browser proxy/IP
                 token = try_login_api_via_page(page)
                 if token:
                     result["debug_hints"].append("页面 API 登录兜底成功")
@@ -306,48 +400,18 @@ def run_once(proxy: str | None):
                 network_log.clear()
                 click_at = datetime.now(CN_TZ).isoformat()
 
+                # 点击签到按钮
                 sign_target.click()
 
-                # The Turnstile widget mounts inside a closed shadow root, so
-                # neither iframe selectors nor page.frames can reach it. Wait
-                # for the widget container to acquire a real layout box, then
-                # mouse-click the checkbox position (events pierce shadow DOM).
-                widget_box = None
-                for _ in range(15):
-                    widget_box = page.evaluate("""
-                        () => {
-                          const el = document.querySelector('.cloudflare-turnstile-container, .turnstile-widget');
-                          if (!el) return null;
-                          const r = el.getBoundingClientRect();
-                          return { x: r.x, y: r.y, w: r.width, h: r.height };
-                        }
-                    """)
-                    if widget_box and widget_box.get("w", 0) > 50 and widget_box.get("h", 0) > 30:
-                        break
-                    page.wait_for_timeout(1000)
-
-                if widget_box and widget_box.get("w", 0) > 50:
-                    x = widget_box["x"] + 18
-                    y = widget_box["y"] + widget_box["h"] / 2
-                    page.mouse.move(x, y)
-                    page.wait_for_timeout(200)
-                    page.mouse.click(x, y)
-                    result["debug_hints"].append(
-                        f"mouse 点击 widget ({x:.0f},{y:.0f}) box={widget_box}"
-                    )
+                # ==================== 核心升级：调用强大的 Turnstile 处理逻辑 ====================
+                turnstile_solved = handle_turnstile_with_retry(page)
+                if turnstile_solved:
+                    result["debug_hints"].append("Turnstile token 已成功生成")
                 else:
-                    result["debug_hints"].append(f"未找到 Turnstile widget box: {widget_box}")
+                    result["debug_hints"].append("Turnstile token 未能生成(超时或被拦截)")
+                # =================================================================================
 
-                # Wait for Cloudflare's silent challenge + token + frontend POST.
-                try:
-                    page.wait_for_function(
-                        "() => { const el = document.querySelector('[name=\"cf-turnstile-response\"]'); return !!(el && el.value && el.value.length > 0); }",
-                        timeout=30000,
-                    )
-                    result["debug_hints"].append("Turnstile token 已生成")
-                except PlaywrightTimeoutError:
-                    result["debug_hints"].append("Turnstile token 未生成(超时)")
-                page.wait_for_timeout(8000)
+                page.wait_for_timeout(5000)
 
                 try:
                     page.screenshot(path=str(ARTIFACTS / f"after-click-{TS}.png"), full_page=True)
