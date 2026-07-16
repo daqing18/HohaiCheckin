@@ -25,8 +25,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies & Xvfb
         run: |
+          sudo apt-get update && sudo apt-get install -y xvfb
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           python -m patchright install --with-deps chromium
@@ -86,16 +87,17 @@ jobs:
               ;;
           esac
 
-      - name: Run check-in
+      - name: Run check-in (with Xvfb virtual display)
         env:
           HOHAI_UN: ${{ secrets.HOHAI_UN }}
           HOHAI_PW: ${{ secrets.HOHAI_PW }}
           HOHAI_TGTK: ${{ secrets.HOHAI_TGTK }}
           HOHAI_TGID: ${{ secrets.HOHAI_TGID }}
-          HEADLESS: 'true'
+          HEADLESS: 'false'  # 核心修改：改为 false，关闭无头模式
           STRICT_PROXY: 'true'
           HTTP_PROXY_URL: ${{ env.PROXY_ENDPOINT }}
-        run: python checkin.py
+        # 核心修改：使用 xvfb-run 启动图形化虚拟桌面，指定分辨率与脚本一致
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1366x900x24" python checkin.py
 
       - name: Stop sing-box
         if: always()
