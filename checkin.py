@@ -250,7 +250,7 @@ def handle_turnstile_with_retry(page) -> bool:
 
     for attempt in range(5):
         log(f"🔄 正在进行第 {attempt + 1} 轮 Turnstile 突破尝试...")
-        
+        
         try:
             page.evaluate(_EXPAND_JS)
         except Exception:
@@ -273,7 +273,7 @@ def handle_turnstile_with_retry(page) -> bool:
         if widget_box and widget_box.get("w", 0) > 30:
             x = widget_box["x"] + widget_box["w"] * 0.2
             y = widget_box["y"] + widget_box["h"] * 0.5
-            
+            
             log(f"🖱️ 锁定验证码区域，执行拟人滑动点击: ({x:.0f}, {y:.0f})")
             try:
                 page.mouse.move(x - 50, y - 50)
