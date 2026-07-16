@@ -1,3 +1,12 @@
+
+      - name: Fix indentation
+        run: |
+          # 使用 autopep8 工具自动修复 Python 缩进格式
+          pip install autopep8
+          autopep8 --in-place --aggressive --aggressive checkin.py
+          
+      - name: Run check-in (with Xvfb virtual display)
+        # ... 原来的步骤 ...
 name: Hohai Daily Check-in
 
 env:
