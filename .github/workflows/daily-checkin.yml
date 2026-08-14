@@ -132,43 +132,13 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          CURRENT_RUN_ID: ${{ github.run_id }}
-          REPO: ${{ github.repository }}
         run: |
-          PAGE=1
-          DELETED=0
-          TOTAL=0
-          while true; do
-            RAW=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${REPO}/actions/runs?per_page=100&page=${PAGE}")
-
-            RUNS=$(echo "$RAW" | jq -r '.workflow_runs[].id' 2>/dev/null)
-            if [ -z "$RUNS" ]; then
-              break
-            fi
-            PAGE=$((PAGE + 1))
-            for RUN_ID in $RUNS; do
-              if [ "$RUN_ID" = "$CURRENT_RUN_ID" ]; then
-                echo "⏭️ 跳过当前运行 $RUN_ID"
-                continue
-              fi
-              TOTAL=$((TOTAL + 1))
-              echo "🗑️ 删除运行记录: $RUN_ID"
-              CODE=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE \
-                -H "Authorization: Bearer ${GH_TOKEN}" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}")
-              if [ "$CODE" = "204" ]; then
-                DELETED=$((DELETED + 1))
-              else
-                echo "  ❌ 删除失败，响应码: $CODE"
-              fi
-              sleep 0.3
-            done
-            COUNT=$(echo "$RUNS" | wc -w)
-            if [ "$COUNT" -lt 100 ]; then
-              break
+          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=100 --json databaseId --jq '.[].databaseId')
+          count=0
+          for run_id in $runs; do
+            count=$((count + 1))
+            if [ $count -gt 1 ]; then
+              echo "删除运行记录: $run_id"
+              gh run delete $run_id || true
             fi
           done
-          echo "📊 共找到 ${TOTAL} 条旧记录，删除 ${DELETED} 条，保留最新 1 条"
