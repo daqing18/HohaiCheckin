@@ -123,9 +123,19 @@ def send_telegram(payload: dict):
 def detect_balance_from_dom(page):
     return page.evaluate(r"""
         () => {
-          const labels = [...document.querySelectorAll('span')].filter(s => (s.innerText || '').trim() === '余额');
+          // 1. 暴力扫全文：找"余额"附近的数字（兼容"账户余额""我的余额"等变体）
+          const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+          const m1 = body.match(/余额[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)\s*¥?/);
+          if (m1) return `${m1[1]} ¥`;
+          // 2. 找带 ¥ 符号的数字（如 "2.21 ¥"）
+          const m2 = body.match(/([0-9]+(?:\.[0-9]+)?)\s*¥/);
+          if (m2) return `${m2[1]} ¥`;
+          // 3. 原始 rollers 方式（兼容滚动数字组件）
+          const labels = [...document.querySelectorAll('span,div,p,h1,h2,h3')].filter(
+            s => /余额/.test((s.innerText || '').trim())
+          );
           for (const label of labels) {
-            const card = label.closest('div');
+            const card = label.closest('div') || label;
             if (!card) continue;
             const rollers = [...card.querySelectorAll('span.transition-transform')];
             if (rollers.length > 0) {
@@ -141,12 +151,9 @@ def detect_balance_from_dom(page):
               if (digits.length > 0) return `${digits} ¥`;
             }
             const txt = (card.innerText || '').replace(/\s+/g, ' ').trim();
-            const m2 = txt.match(/([0-9]+(?:\.[0-9]+)?)/);
-            if (m2) return `${m2[1]} ¥`;
+            const m3 = txt.match(/([0-9]+(?:\.[0-9]+)?)\s*¥?/);
+            if (m3) return `${m3[1]} ¥`;
           }
-          const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
-          const m3 = body.match(/余额[^0-9]{0,12}([0-9]+(?:\.[0-9]+)?)/);
-          if (m3) return `${m3[1]} ¥`;
           return null;
         }
     """)
