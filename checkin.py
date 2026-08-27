@@ -371,6 +371,16 @@ def run_once(proxy: str | None):
                     else:
                         result["debug_hints"].append("表单登录和 API 登录均失败（可能被风控拦截）")
 
+            # 确保跳转到 dashboard（表单登录后可能还在登录页）
+            try:
+                cur_url = page.url
+                if "dashboard" not in cur_url:
+                    log("跳转到 dashboard 页面")
+                    page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(2000)
+            except Exception as e:
+                result["debug_hints"].append(f"跳转 dashboard 失败: {e}")
+
             page.wait_for_timeout(1800)
 
             sign_target = None
@@ -445,6 +455,14 @@ def run_once(proxy: str | None):
                 result["note"] = "No sign-in control found"
                 if page.locator('input[type="password"]').count() > 0:
                     result["debug_hints"].append("当前页面疑似仍在登录页")
+
+            # 读取余额前确保在 dashboard 页面
+            try:
+                if "dashboard" not in page.url:
+                    page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(2000)
+            except Exception:
+                pass
 
             result["balance"] = detect_balance_from_dom(page)
             return 0 if result["signed_today"] else 2
