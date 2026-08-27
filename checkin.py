@@ -121,15 +121,32 @@ def send_telegram(payload: dict):
 
 
 def detect_balance_from_dom(page):
+    # 等待数字滚动动画完成
+    page.wait_for_timeout(3000)
+    # 先打印页面里含"余额"或"¥"的文本，方便定位
+    debug_text = page.evaluate(r"""
+        () => {
+          const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+          // 找"余额"附近 80 字符
+          const idx = body.indexOf('余额');
+          if (idx >= 0) return body.substring(Math.max(0, idx - 10), idx + 80);
+          // 找"¥"附近 80 字符
+          const idx2 = body.indexOf('¥');
+          if (idx2 >= 0) return body.substring(Math.max(0, idx2 - 40), idx2 + 40);
+          return 'NO_BALANCE_TEXT';
+        }
+    """)
+    log(f"🔍 余额区域文本: {repr(debug_text)}")
+
     return page.evaluate(r"""
         () => {
-          // 1. 暴力扫全文：找"余额"附近的数字（兼容"账户余额""我的余额"等变体）
           const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+          // 1. 暴力扫全文：找"余额"附近的数字（兼容"账户余额""我的余额"等变体）
           const m1 = body.match(/余额[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)\s*¥?/);
-          if (m1) return `${m1[1]} ¥`;
-          // 2. 找带 ¥ 符号的数字（如 "2.21 ¥"）
+          if (m1 && m1[1] !== '0') return `${m1[1]} ¥`;
+          // 2. 找带 ¥ 符号的数字（排除 0）
           const m2 = body.match(/([0-9]+(?:\.[0-9]+)?)\s*¥/);
-          if (m2) return `${m2[1]} ¥`;
+          if (m2 && m2[1] !== '0') return `${m2[1]} ¥`;
           // 3. 原始 rollers 方式（兼容滚动数字组件）
           const labels = [...document.querySelectorAll('span,div,p,h1,h2,h3')].filter(
             s => /余额/.test((s.innerText || '').trim())
@@ -148,12 +165,15 @@ def detect_balance_from_dom(page):
               }).join('');
               const hasDot = (card.innerText || '').includes('.');
               if (digits.length >= 3 && hasDot) return `${digits[0]}.${digits.slice(1)} ¥`;
-              if (digits.length > 0) return `${digits} ¥`;
+              if (digits.length > 0 && digits !== '0') return `${digits} ¥`;
             }
             const txt = (card.innerText || '').replace(/\s+/g, ' ').trim();
             const m3 = txt.match(/([0-9]+(?:\.[0-9]+)?)\s*¥?/);
-            if (m3) return `${m3[1]} ¥`;
+            if (m3 && m3[1] !== '0') return `${m3[1]} ¥`;
           }
+          // 4. 兜底：返回找到的任何数字（包括0）
+          if (m2) return `${m2[1]} ¥`;
+          if (m1) return `${m1[1]} ¥`;
           return null;
         }
     """)
