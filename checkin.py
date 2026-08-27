@@ -121,59 +121,64 @@ def send_telegram(payload: dict):
 
 
 def detect_balance_from_dom(page):
-    # 等待数字滚动动画完成
     page.wait_for_timeout(3000)
-    # 先打印页面里含"余额"或"¥"的文本，方便定位
-    debug_text = page.evaluate(r"""
-        () => {
-          const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
-          // 找"余额"附近 80 字符
-          const idx = body.indexOf('余额');
-          if (idx >= 0) return body.substring(Math.max(0, idx - 10), idx + 80);
-          // 找"¥"附近 80 字符
-          const idx2 = body.indexOf('¥');
-          if (idx2 >= 0) return body.substring(Math.max(0, idx2 - 40), idx2 + 40);
-          return 'NO_BALANCE_TEXT';
-        }
-    """)
-    log(f"🔍 余额区域文本: {repr(debug_text)}")
-
     return page.evaluate(r"""
         () => {
-          const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
-          // 1. 暴力扫全文：找"余额"附近的数字（兼容"账户余额""我的余额"等变体）
-          const m1 = body.match(/余额[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)\s*¥?/);
-          if (m1 && m1[1] !== '0') return `${m1[1]} ¥`;
-          // 2. 找带 ¥ 符号的数字（排除 0）
-          const m2 = body.match(/([0-9]+(?:\.[0-9]+)?)\s*¥/);
-          if (m2 && m2[1] !== '0') return `${m2[1]} ¥`;
-          // 3. 原始 rollers 方式（兼容滚动数字组件）
-          const labels = [...document.querySelectorAll('span,div,p,h1,h2,h3')].filter(
-            s => /余额/.test((s.innerText || '').trim())
-          );
+          // 找"余额"标签（向上找包含 ¥ 的卡片容器）
+          const labels = [...document.querySelectorAll('*')].filter(el => {
+            const t = (el.innerText || '').trim();
+            return /余额/.test(t) && t.length < 30;
+          });
           for (const label of labels) {
-            const card = label.closest('div') || label;
-            if (!card) continue;
-            const rollers = [...card.querySelectorAll('span.transition-transform')];
-            if (rollers.length > 0) {
-              const digits = rollers.map(r => {
-                const t = r.style.transform || '';
-                const m = t.match(/translateY\(-([0-9]+)%\)/);
-                if (!m) return '';
-                const pct = Number(m[1]);
-                return String(Math.round(pct / 10) % 10);
-              }).join('');
-              const hasDot = (card.innerText || '').includes('.');
-              if (digits.length >= 3 && hasDot) return `${digits[0]}.${digits.slice(1)} ¥`;
-              if (digits.length > 0 && digits !== '0') return `${digits} ¥`;
+            let card = label;
+            for (let i = 0; i < 10; i++) {
+              if (!card.parentElement) break;
+              card = card.parentElement;
+              if ((card.innerText || '').includes('¥')) break;
             }
-            const txt = (card.innerText || '').replace(/\s+/g, ' ').trim();
-            const m3 = txt.match(/([0-9]+(?:\.[0-9]+)?)\s*¥?/);
-            if (m3 && m3[1] !== '0') return `${m3[1]} ¥`;
+            if (!card || !(card.innerText || '').includes('¥')) continue;
+
+            // 找所有 overflow:hidden 的小容器（每个是一个数字位）
+            const rollers = [...card.querySelectorAll('*')].filter(el => {
+              const s = getComputedStyle(el);
+              return (s.overflow === 'hidden' || s.overflowY === 'hidden') &&
+                     el.offsetHeight > 0 && el.offsetHeight <= 60;
+            });
+            if (rollers.length === 0) continue;
+
+            // 对每个 roller，找可见的数字
+            const visibleDigits = [];
+            for (const roller of rollers) {
+              const rRect = roller.getBoundingClientRect();
+              const digits = [...roller.querySelectorAll('*')].filter(el => {
+                const t = (el.innerText || '').trim();
+                return /^[0-9]$/.test(t);
+              });
+              if (digits.length === 0) continue;
+              let bestDigit = null;
+              let bestScore = 0;
+              for (const d of digits) {
+                const dRect = d.getBoundingClientRect();
+                const dCenter = (dRect.top + dRect.bottom) / 2;
+                if (dCenter >= rRect.top && dCenter <= rRect.bottom) {
+                  const score = Math.min(dRect.bottom, rRect.bottom) - Math.max(dRect.top, rRect.top);
+                  if (score > bestScore) {
+                    bestScore = score;
+                    bestDigit = d.innerText.trim();
+                  }
+                }
+              }
+              if (bestDigit) visibleDigits.push(bestDigit);
+            }
+
+            const hasDot = (card.innerText || '').includes('.');
+            if (visibleDigits.length >= 3 && hasDot) {
+              return `${visibleDigits[0]}.${visibleDigits.slice(1).join('')} ¥`;
+            }
+            if (visibleDigits.length > 0) {
+              return `${visibleDigits.join('')} ¥`;
+            }
           }
-          // 4. 兜底：返回找到的任何数字（包括0）
-          if (m2) return `${m2[1]} ¥`;
-          if (m1) return `${m1[1]} ¥`;
           return null;
         }
     """)
