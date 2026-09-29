@@ -238,7 +238,7 @@ def submit_login_form(page):
 
 
 def find_sign_target(page):
-    card = page.locator('[data-checkin-card="default"]').first
+    card = page.locator('[data-checkin-card]').first
     if card.count() > 0:
         for c in [
             card.locator('button:has-text("签到")').first,
@@ -263,7 +263,7 @@ def find_sign_target(page):
 
 
 def is_signed_card(page) -> bool:
-    if page.locator("[data-checkin-card='default']").count() > 0:
+    if page.locator("[data-checkin-card]").count() > 0:
         if page.locator("[class*='statusNotChecked']").count() == 0:
             return True
     for txt in ("今日已签到", "签到完成", "签到成功", "已签到", "明日再来", "已经签过"):
@@ -328,6 +328,42 @@ def handle_turnstile_with_retry(page) -> bool:
 
     log("❌ 5 轮 Turnstile 尝试均未生成有效 Token")
     return False
+
+
+def dismiss_blocking_modals(page, max_rounds=5) -> int:
+    """关闭可能遮挡签到按钮的公告/促销弹窗。返回成功关闭的弹窗数量。"""
+    closed = 0
+    dismiss_selectors = [
+        'button:has-text("我知道了")',
+        'button:has-text("知道了")',
+        'button:has-text("关闭")',
+        '[aria-label="关闭"]',
+        'button[aria-label="Close"]',
+        '.modal-close',
+        '[data-dismiss="modal"]',
+    ]
+    for _ in range(max_rounds):
+        handled = False
+        for sel in dismiss_selectors:
+            try:
+                loc = page.locator(sel).first
+                if loc.count() > 0 and loc.is_visible():
+                    loc.click(timeout=5000)
+                    page.wait_for_timeout(800)
+                    closed += 1
+                    handled = True
+                    break
+            except Exception:
+                continue
+        if not handled:
+            break
+    # 兜底：Esc 关闭残留弹窗
+    try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+    except Exception:
+        pass
+    return closed
 
 
 def run_once(proxy: str | None):
@@ -433,7 +469,23 @@ def run_once(proxy: str | None):
                 network_log.clear()
                 click_at = datetime.now(CN_TZ).isoformat()
 
-                sign_target.click()
+                # 先关闭可能遮挡按钮的公告/促销弹窗（如节日活动弹窗），再确保按钮可点
+                dismissed = dismiss_blocking_modals(page)
+                if dismissed:
+                    log(f"已关闭 {dismissed} 个遮挡弹窗，重新定位签到按钮")
+                    sign_target = find_sign_target(page)
+                    if sign_target is None:
+                        result["status"] = "执行失败"
+                        result["note"] = "关闭弹窗后签到按钮丢失"
+                        result["debug_hints"].append("dismiss modals then sign target lost")
+                        save_and_exit(1)
+                try:
+                    sign_target.scroll_into_view_if_needed(timeout=10000)
+                    sign_target.wait_for(state="visible", timeout=10000)
+                except Exception as e:
+                    result["debug_hints"].append(f"按钮可见性等待异常: {e}")
+
+                sign_target.click(timeout=30000)
 
                 turnstile_solved = handle_turnstile_with_retry(page)
                 if turnstile_solved:
