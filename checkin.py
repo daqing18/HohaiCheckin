@@ -263,10 +263,10 @@ def find_sign_target(page):
 
 
 def is_signed_card(page) -> bool:
-    if page.locator("[data-checkin-card]").count() > 0:
-        if page.locator("[class*='statusNotChecked']").count() == 0:
-            return True
-    for txt in ("今日已签到", "签到完成", "签到成功", "已签到", "明日再来", "已经签过"):
+    # 按钮优先：有可见可点的"签到"按钮 => 今日尚未签到（2026-10-02 修复误判）
+    if page.locator('button:has-text("签到")').first.count() > 0 and page.locator('button:has-text("签到")').first.is_visible() and page.locator('button:has-text("签到")').first.is_enabled(): return False
+    if page.locator("[data-checkin-card]").count() > 0 and page.locator("[class*='statusNotChecked']").count() == 0: return True
+    for txt in ("今日已签到", "签到完成", "签到成功", "明日再来", "已经签过"):
         if page.get_by_text(txt).count() > 0:
             return True
     return False
