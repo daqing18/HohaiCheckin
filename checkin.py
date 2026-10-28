@@ -120,6 +120,7 @@ def send_telegram(payload: dict):
         print(f"[warn] telegram send failed: {e}")
 
 
+
 def detect_balance_from_dom(page):
     page.wait_for_timeout(3000)
     return page.evaluate(r"""
@@ -279,6 +280,7 @@ def is_signed_card(page) -> tuple:
     return False, "无已签到 positive 证据"
 
 
+
 def handle_turnstile_with_retry(page) -> bool:
     log("🔍 开始处理 Cloudflare Turnstile 验证...")
     page.wait_for_timeout(2000)
@@ -289,7 +291,7 @@ def handle_turnstile_with_retry(page) -> bool:
 
     for attempt in range(5):
         log(f"🔄 正在进行第 {attempt + 1} 轮 Turnstile 突破尝试...")
-        
+
         try:
             page.evaluate(_EXPAND_JS)
         except Exception:
@@ -312,7 +314,7 @@ def handle_turnstile_with_retry(page) -> bool:
         if widget_box and widget_box.get("w", 0) > 30:
             x = widget_box["x"] + widget_box["w"] * 0.2
             y = widget_box["y"] + widget_box["h"] * 0.5
-            
+
             log(f"🖱️ 锁定验证码区域，执行拟人滑动点击: ({x:.0f}, {y:.0f})")
             try:
                 page.mouse.move(x - 50, y - 50)
@@ -371,6 +373,7 @@ def dismiss_blocking_modals(page, max_rounds=5) -> int:
     except Exception:
         pass
     return closed
+
 
 
 def run_once(proxy: str | None):
@@ -540,7 +543,7 @@ def run_once(proxy: str | None):
                 )
 
                 _signed_after, _reason_after = is_signed_card(page)
-        if checkin_api_ok:
+                if checkin_api_ok:
                     result["status"] = "本次签到成功"
                     result["signed_today"] = True
                     result["debug_hints"].append("检测到签到 API 2xx 响应")
