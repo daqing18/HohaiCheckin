@@ -509,7 +509,7 @@ def run_once(proxy: str | None):
                 except Exception as e:
                     result["debug_hints"].append(f"按钮可见性等待异常: {e}")
 
-                sign_target.click(timeout=30000)
+                log("已定位到签到目标，准备点击"); sign_target.click(timeout=30000)
 
                 turnstile_solved = handle_turnstile_with_retry(page)
                 if turnstile_solved:
@@ -539,15 +539,16 @@ def run_once(proxy: str | None):
                     for ev in network_log
                 )
 
-                if checkin_api_ok:
+                _signed_after, _reason_after = is_signed_card(page)
+        if checkin_api_ok:
                     result["status"] = "本次签到成功"
                     result["signed_today"] = True
                     result["debug_hints"].append("检测到签到 API 2xx 响应")
                     log("签到成功 (via API)")
-                elif is_signed_card(page):
+                elif _signed_after:
                     result["status"] = "本次签到成功"
                     result["signed_today"] = True
-                    log("签到成功 (via DOM)")
+                    log("签到成功 (via DOM)"); log(f"点击后 DOM 判定依据: {_reason_after}")
                 else:
                     result["status"] = "签到结果不确定"
                     result["note"] = "Clicked sign-in but no checkin API hit nor card state change"
